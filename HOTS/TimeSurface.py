@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
 import numpy as np
 
-class TimeSurface(object):
+class timesurface(object):
     """ TimeSurface is a class created from a stream of events. It stores the events on the pixel grid and apply an exponential decay to past events when updating the time surface. It returns the timesurface defined by a spatial window. The output is a 1D vector representing the time-surface.
 
     ATTRIBUTES:
@@ -52,7 +52,7 @@ class TimeSurface(object):
             self.x, self.y, self.t, self.p = xev, yev, tev, pev
             self.spatpmat[self.p, self.x, self.y] = 1
             timesurf[self.p, self.R, self.R] = 1
-        elif xev==self.x and yev==self.y and tev-self.t<self.dtemp: # artefacts of a ATIS camera
+        elif xev==self.x and yev==self.y and pev==self.p and tev-self.t<self.dtemp: # artefacts of a ATIS camera
             #print(f'small time difference between 2 events on the same pixel: {tev-self.t} ms')
             pass
         else:
@@ -78,8 +78,7 @@ class TimeSurface(object):
 
         card = np.nonzero(timesurf[self.p])
         if len(card[0])>self.filt*self.R:
-            TS = np.reshape(timesurf, [len(timesurf)*(2*self.R+1)**2,1])
-            TS /= np.linalg.norm(TS)
+            TS = np.reshape(timesurf, [len(timesurf)*(2*self.R+1)**2])
         else:
             TS = []
         

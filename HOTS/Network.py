@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from Layer import layer
-from TimeSurface import TimeSurface
+from TimeSurface import timesurface
 from Stats import stats
 from tqdm import tqdm
 import tonic
@@ -23,34 +23,26 @@ class network(object):
              .plotactiv -> plots the activation map of each layer
              """
 
-    def __init__(self,  timestr = None,
-                        # architecture of the network (default=Lagorce2017)
-                        nbclust = [4, 8, 16],
+    def __init__(self,  name = 'hots',
+                        timestr = None, # date of creation of the network
+                        nbclust = [4, 8, 16], # architecture of the network (default=Lagorce2017)
                         # parameters of time-surfaces and datasets
-                        tau = 10, #timestamp en millisec/
-                        K_tau = 10,
+                        tau = [1e1, 1e2, 1e3], #time constant for exponential decay in millisec
+                        R = [2, 4, 8], # parameter defining the spatial size of the time surface
                         decay = 'exponential', # among ['exponential', 'linear']
-                        nbpolcam = 2,
-                        R = 2,
-                        K_R = 2,
-                        camsize = (34, 34),
-                        # functional parameters of the network
-                        algo = 'lagorce', # among ['lagorce', 'maro', 'mpursuit']
-                        krnlinit = 'rdn',
-                        hout = False, #works only with mpursuit
-                        homeo = False,
-                        homparam = [.25, 1],
-                        pola = True,
-                        to_record = True,
-                        filt = 2,
-                        sigma = None,
-                        jitter = False,
-                        homeinv = False,
+                        nbpolcam = 2, # number of polarities for the event stream as input of the network
+                        camsize = (34, 34), # size of the pixel grid that recorded the event stream
+                        to_record = True, 
                 ):
-        self.jitter = jitter # != from jitonic, this jitter is added at the layer output, creating an average pooling
-        self.onbon = False
-        self.name = 'hots'
+        self.name = name
         self.date = timestr
+        if self.name == 'hots':
+            # replicates methods from Lagorce et al. 2017
+            algo, krnlinit, homeo, sigma = 'lagorce', 'first', False, None
+        elif self.name == 'homhots':
+            # replicates methods from Grimaldi et al. 2021
+            algo, krnlinit, homeo, sigma = 'lagorce', 'rdn', True, None
+            
         tau *= 1e3 # to enter tau in ms
         nblay = len(nbclust)
         if to_record:
@@ -59,14 +51,13 @@ class network(object):
         self.L = [[]]*nblay
         for lay in range(nblay):
             if lay == 0:
-                self.TS[lay] = TimeSurface(R, tau, camsize, nbpolcam, pola, filt, sigma)
-                self.L[lay] = layer(R, nbclust[lay], pola, nbpolcam, homeo, homparam, homeinv, algo, hout, krnlinit, to_record)
+                self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbpolcam, sigma)
+                self.L[lay] = layer(R[lay], nbclust[lay], nbpolcam, homeo, algo, krnlinit, output, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
             else:
-                self.TS[lay] = TimeSurface(R*(K_R**lay), tau*(K_tau**lay), camsize, nbclust[lay-1], pola, filt, sigma)
-                #self.L[lay] = layer(R*(K_R**lay), nbclust*(K_clust**lay), pola, nbclust*(K_clust**(lay-1)), homeo, homparam, homeinv, algo, hout, krnlinit, to_record)
-                self.L[lay] = layer(R*(K_R**lay), nbclust[lay], pola, nbclust[lay-1], homeo, homparam, homeinv, algo, hout, krnlinit, to_record)
+                self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbclust[lay-1], pola, filt, sigma)
+                self.L[lay] = layer(R[lay], nbclust[lay], nbclust[lay-1], homeo, algo, krnlinit, output, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
 
@@ -842,156 +833,6 @@ class network(object):
                 axi.imshow(self.TS[i].spatpmat, cmap=plt.cm.plasma, interpolation='nearest')
                 axi.set_xticks(())
                 axi.set_yticks(())
-
-
-##________________POOLING NETWORK____________________________________________________________
-##___________________________________________________________________________________________
-
-
-class poolingnetwork(network):
-
-    def __init__(self,
-                        # architecture of the network (default=Lagorce2017)
-                        nbclust = 4,
-                        K_clust = 2, # nbclust(L+1) = K_clust*nbclust(L)
-                        nblay = 3,
-                        # parameters of time-surfaces and datasets
-                        tau = 10, #timestamp en millisec/
-                        K_tau = 10,
-                        decay = 'exponential', # among ['exponential', 'linear']
-                        nbpolcam = 2,
-                        R = 2,
-                        K_R = 2,
-                        camsize = (34, 34),
-                        # functional parameters of the network
-                        algo = 'lagorce', # among ['lagorce', 'maro', 'mpursuit']
-                        krnlinit = 'rdn',
-                        hout = False, #works only with mpursuit
-                        homeo = False,
-                        homparam = [.25, 1],
-                        pola = True,
-                        to_record = True,
-                        filt = 2,
-                        sigma = None,
-                        jitter = False,
-                        homeinv = False,
-
-                        Kstride = 2,
-                        Kevtstr = False,
-                ):
-        super().__init__(
-                        nbclust = nbclust,
-                        K_clust = K_clust,
-                        nblay = nblay,
-                        tau = tau,
-                        K_tau = K_tau,
-                        decay = decay,
-                        nbpolcam = nbpolcam,
-                        R = R,
-                        K_R = K_R,
-                        camsize = camsize,
-                        algo = algo,
-                        krnlinit = krnlinit,
-                        hout = hout,
-                        homeo = homeo,
-                        homparam = homparam,
-                        pola = pola,
-                        to_record = to_record,
-                        filt = filt,
-                        sigma = sigma,
-                        jitter = jitter,
-                        homeinv = homeinv
-                )
-
-        self.Kstride = Kstride
-        self.Kevtstr = Kevtstr
-        for lay in range(1,nblay):
-            camsize = np.array(camsize)//Kstride
-            self.TS[lay] = TimeSurface(R, tau*(K_tau**lay), camsize, nbclust*(K_clust**(lay-1)), pola, filt, sigma)
-            self.L[lay] = layer(R, 16, pola, nbclust*(K_clust**(lay-1)), homeo, homparam, homeinv, algo, hout, krnlinit, to_record)
-            self.stats[lay] = stats(nbclust*(K_clust**lay), camsize)
-
- ##____________________________________________________________________________________
-
-    def run(self, x, y, t, p, learn=False, to_record=False):
-        lay = 0
-        activout=False
-        while lay<len(self.TS):
-            timesurf, activ = self.TS[lay].addevent(x, y, t, p)
-            if activ:
-                p, dist = self.L[lay].run(timesurf, learn)
-                if to_record:
-                    self.stats[lay].update(p, self.L[lay].kernel, timesurf, dist)
-                    self.stats[lay].actmap[int(np.argmax(p)),self.TS[lay].x,self.TS[lay].y]=1
-                if self.jitter:
-                    x,y = spatial_jitter(x,y,self.TS[0].camsize)
-                # pooling
-                if lay<len(self.TS)-1:
-                    x = min(x//self.Kstride,self.TS[lay+1].camsize[0]-1)
-                    y = min(y//self.Kstride,self.TS[lay+1].camsize[1]-1)
-                lay+=1
-                if lay==len(self.TS):
-                    activout=True
-            else:
-                lay = len(self.TS)
-        out = [x,y,t,np.argmax(p)]
-        return out, activout
-
-
-    def learning1by1(self, nb_digit=2, dataset='nmnist', diginit=True, filtering=None):
-
-        loader, ordering, classes = self.load(dataset)
-        nbclass = len(classes)
-        #eventslist = [next(iter(loader))[0] for i in range(nb_digit)]
-        eventslist = []
-        nbloadz = np.zeros([nbclass])
-        while np.sum(nbloadz)<nb_digit*nbclass:
-            loadev, loadtar = next(iter(loader))
-            if nbloadz[loadtar]<nb_digit:
-                eventslist.append(loadev)
-                nbloadz[loadtar]+=1
-
-        for n in range(len(self.L)):
-            pbar = tqdm(total=nb_digit*nbclass)
-            for idig in range(nb_digit*nbclass):
-                pbar.update(1)
-                events = eventslist[idig]
-                if diginit:
-                    for l in range(n+1):
-                        self.TS[l].spatpmat[:] = 0
-                        self.TS[l].iev = 0
-                for iev in range(events.shape[1]):
-                    x,y,t,p =   events[0,iev,ordering.find("x")].item(), \
-                                events[0,iev,ordering.find("y")].item(), \
-                                events[0,iev,ordering.find("t")].item(), \
-                                events[0,iev,ordering.find("p")].item()
-                    lay=0
-                    while lay < n+1:
-                        if lay==n:
-                            learn=True
-                        else:
-                            learn=False
-                        timesurf, activ = self.TS[lay].addevent(x, y, t, p)
-                        if lay==0 or filtering=='all':
-                            activ2=activ
-                        if activ2 and np.sum(timesurf)>0:
-                        #if activ==True:
-                            p, dist = self.L[lay].run(timesurf, learn)
-                            if learn:
-                                self.stats[lay].update(p, self.L[lay].kernel, timesurf, dist)
-                            if self.jitter:
-                                x,y = spatial_jitter(x,y,self.TS[0].camsize)
-                            # no stride for the last layer
-                            if lay<len(self.TS)-1:
-                                x = min(x//self.Kstride,self.TS[lay+1].camsize[0]-1)
-                                y = min(y//self.Kstride,self.TS[lay+1].camsize[1]-1)
-                            lay += 1
-                        else:
-                            lay = n+1
-            pbar.close()
-        for l in range(len(self.L)):
-            self.stats[l].histo = self.L[l].cumhisto.copy()
-        return loader, ordering
 
 
 #__________________OLD_CODE___________________________________________________________________________
