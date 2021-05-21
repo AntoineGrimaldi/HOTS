@@ -1,7 +1,6 @@
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
 import numpy as np
-import copy
 
 class TimeSurface(object):
     """ TimeSurface is a class created from a stream of events. It stores the events on the pixel grid and apply an exponential decay to past events when updating the time surface. It returns the timesurface defined by a spatial window. The output is a 1D vector representing the time-surface.
@@ -17,7 +16,6 @@ class TimeSurface(object):
                                         (some pixels (x>255) spike 2 times)
             kthrs -> constante*tau defining a null threshold for past events
             beta -> is a constant to apply a temporal decay if p[pol]<1
-            pola -> boolean indicating if the network uses polarities or not
 
     METHODS:
             .addevent -> add an event to the time surface when event.x, event.y, event.t and p is given as input
@@ -28,16 +26,15 @@ class TimeSurface(object):
             .getts -> take the time surface within the spatial window defined by R on the matrix spatpmat
 """
 
-    def __init__(self, R, tau, camsize, nbpol=2, pola=True, filt=2, sigma=None, decay='exponential'):
-        # PARAMETERS OF THE TIME SURFACES
-        self.R = R
-        self.tau = tau # in ms
-        self.camsize = camsize
-        self.dtemp = 0.002
+    def __init__(self, R, tau, camsize, nbpol=2, sigma=None, decay='exponential'):
+        # PARAMETERS OF THE TIME SURFACE
+        self.R = R 
+        self.tau = tau # in micro secondes
+        self.camsize = camsize 
+        self.dtemp = 2 # minimum time difference to trigger a new event on the same pixel
         self.kthrs = 5
         self.beta = 1
-        self.pola = pola
-        self.filt = filt
+        self.filt = 2
         self.sigma = sigma
         self.decay = decay
         # VARIABLES OF THE TIME SURFACE
@@ -48,63 +45,29 @@ class TimeSurface(object):
         self.iev = 0
         self.spatpmat = np.zeros((nbpol,camsize[0]+1,camsize[1]+1))
 
-    def addevent(self, xev, yev, tev, pev):
+    def addevent(self, xev, yev, tev, pev): # get integers as input
         timesurf = np.zeros((self.spatpmat.shape[0],2*self.R+1,2*self.R+1))
-        xev, yev = int(xev), int(yev)
-        #xev, yev = int(min(xev,self.camsize[0])), int(min(yev,self.camsize[1]))
-        #xev, yev = int(max(xev,0)), int(max(yev,0))
-        if isinstance(pev, (int, float)):
-            p = np.zeros((self.spatpmat.shape[0]))
-            p[int(pev)]=1
-            pev = p.copy()
-        #else: # TODO: check the following: if isinstance(pev, torch.Tensor):#
-        elif pev.size<2:
-            # print(pev)
-            p = np.zeros((self.spatpmat.shape[0]))
-            p[int(pev)]=1
-            pev = p.copy()
-
         if self.iev==0:
             self.iev += 1
-            self.t = tev
-            self.p = np.argmax(pev)
-            polz = np.nonzero(pev)[0]
-            #to change if pev has multiple polarities
-            self.spatpmat[np.argmax(pev), xev, yev] = 1
-            timesurf[np.argmax(pev), self.R, self.R] = 1
-            #for i in range(len(polz)):
-                #self.spatpmat[polz[i], xev, yev] = np.exp(-self.beta*(1-pev[polz[i]])/self.tau)
-                #timesurf[polz[i], self.R, self.R] = np.exp(-self.beta*(1-pev[polz[i]])/self.tau)
-        elif xev==self.x and yev==self.y and tev-self.t<self.dtemp:
-            #print('error in time between 2 events on the same pixel: '+ str(tev-self.t) +' ms')
-            pass # no update because camera can spike two times for 1 event
+            self.x, self.y, self.t, self.p = xev, yev, tev, pev
+            self.spatpmat[self.p, self.x, self.y] = 1
+            timesurf[self.p, self.R, self.R] = 1
+        elif xev==self.x and yev==self.y and tev-self.t<self.dtemp: # artefacts of a ATIS camera
+            #print(f'small time difference between 2 events on the same pixel: {tev-self.t} ms')
+            pass
         else:
             self.iev += 1
-            self.x = xev
-            self.y = yev
+            self.x, self.y, self.p = xev, yev, pev
             # updating the spatiotemporal surface
             if self.decay == 'exponential':
-                self.spatpmat = self.spatpmat*np.exp(-(float(tev-self.t))/self.tau)
+                self.spatpmat = self.spatpmat*np.exp(-(tev-self.t)/self.tau)
                 # making threshold for small elements
-                self.spatpmat[self.spatpmat<np.exp(-float(self.kthrs))]=0
+                self.spatpmat[self.spatpmat<np.exp(-self.kthrs)]=0
             elif self.decay == 'linear':
                 self.spatpmat = max(self.spatpmat-(tev-self.t)/self.tau,0)
             self.t = tev
-            self.p = np.argmax(pev)
-            polz = np.nonzero(pev)[0]
-            #to change if pev has multiple polarities
-            self.spatpmat[np.argmax(pev), xev, yev] = 1
-            #for i in range(len(polz)):
-                #self.spatpmat[polz[i], xev, yev] = np.exp(-self.beta*(1-pev[polz[i]])/self.tau)
-            # making time surface
-
-            #print(timesurf.shape, xev, yev)
+            self.spatpmat[self.p, self.x, self.y] = 1
             timesurf = self.getts()
-            #if xev<self.R or xev+self.R>self.camsize[0]:
-            #self.plote()
-            #print(timesurf.shape)
-            if np.sum(timesurf[:,self.R,self.R])==0:
-                print('TS pas centrée', xev, yev)
 
             if self.sigma is not None:
                 X_p, Y_p = np.meshgrid(np.arange(-self.R, self.R+1),
@@ -113,30 +76,20 @@ class TimeSurface(object):
                 mask_circular = np.exp(- .5 * radius**2 / self.R ** 2 / self.sigma**2)
                 timesurf *= mask_circular
 
-            #if self.camsize[1]-(self.y+1)<self.R or self.camsize[0]-(self.x+1)<self.R:
-                #self.plote()
-            # reshaping timesurf as a 1D vector
-        activ = False
-        if self.pola == False:
-            TS = np.reshape(timesurf[np.argmax(pev)], [(2*self.R+1)**2,1])
-            card = np.nonzero(timesurf[np.argmax(pev)])
-            minact = self.filt*self.R
-        else:
+        card = np.nonzero(timesurf[self.p])
+        if len(card[0])>self.filt*self.R:
             TS = np.reshape(timesurf, [len(timesurf)*(2*self.R+1)**2,1])
-            card = np.nonzero(timesurf)
-            minact = self.filt*self.R
-        normTS = np.linalg.norm(TS)
-        if np.linalg.norm(TS)>0:
-            TS /= normTS
-        if len(card[0])>minact:
-            activ = True
-        return TS, activ
+            TS /= np.linalg.norm(TS)
+        else:
+            TS = []
+        
+        return TS
 
     def getts(self):
-        xshift = copy.copy(self.x)
-        yshift = copy.copy(self.y)
+        xshift = self.x
+        yshift = self.y
         # padding for events near the edges of the pixel grid
-        temp_spatpmat = copy.copy(self.spatpmat)
+        temp_spatpmat = self.spatpmat.copy()
         if self.x-self.R<0:
             temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(self.R,0),(0,0)),'symmetric')
             xshift += self.R
