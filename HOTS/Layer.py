@@ -3,7 +3,7 @@ from TimeSurface import timesurface
 import matplotlib.pyplot as plt
 
 class layer(object):
-    """layer makes the computations within a layer of the HOTS network based on the methods from Lagorce et al. 2017, Maro et al. 2020 or the Matching Pursuit algorithm. 
+    """layer makes the computations within a layer of the HOTS network based on the methods from Lagorce et al. 2017, Maro et al. 2020 or the Matching Pursuit algorithm.
     """
     
     def __init__(self, R, N_clust, nbpola, homeo, algo, krnlinit, output, to_record):
@@ -33,7 +33,7 @@ class layer(object):
         #__________________________________________
         else:
             homparam = [.25, 1]
-            gain = np.exp(homparam[0]*(self.kernel.shape[1]**homparam[1])*(histo-1/self.kernel.shape[1]))
+            gain = np.exp(homparam[0]*(self.kernel.shape[1]**homparam[1])*(1-histo*self.kernel.shape[1]))
         return gain
     
     def run(self, TS, learn):
@@ -43,7 +43,7 @@ class layer(object):
         elif self.algo=='mpursuit':
             h, temphisto = self.mpursuit(TS, learn)
         elif self.algo=='maro':
-            h, temphisto = self.maro(TS, learn)         
+            h, temphisto = self.maro(TS, learn)
         self.cumhisto += temphisto
             
         if learn:

@@ -26,7 +26,7 @@ class timesurface(object):
             .getts -> take the time surface within the spatial window defined by R on the matrix spatpmat
 """
 
-    def __init__(self, R, tau, camsize, nbpol=2, sigma=None, decay='exponential'):
+    def __init__(self, R, tau, camsize, nbpol, sigma, decay):
         # PARAMETERS OF THE TIME SURFACE
         self.R = R 
         self.tau = tau # in micro secondes
@@ -43,21 +43,23 @@ class timesurface(object):
         self.t = 0
         self.p = 0
         self.iev = 0
-        self.spatpmat = np.zeros((nbpol,camsize[0]+1,camsize[1]+1))
+        self.spatpmat = np.zeros([nbpol,camsize[0]+1,camsize[1]+1])
 
     def addevent(self, xev, yev, tev, pev): # get integers as input
         timesurf = np.zeros((self.spatpmat.shape[0],2*self.R+1,2*self.R+1))
+        polarities = np.nonzero(pev)[0]
+        coefficients = pev[polarities]
         if self.iev==0:
             self.iev += 1
-            self.x, self.y, self.t, self.p = xev, yev, tev, pev
-            self.spatpmat[self.p, self.x, self.y] = 1
-            timesurf[self.p, self.R, self.R] = 1
-        elif xev==self.x and yev==self.y and pev==self.p and tev-self.t<self.dtemp: # artefacts of a ATIS camera
+            self.x, self.y, self.t, self.p = xev, yev, tev, polarities
+            self.spatpmat[self.p, self.x, self.y] = coefficients
+            timesurf[self.p, self.R, self.R] = coefficients
+        elif xev==self.x and yev==self.y and polarities==self.p and tev-self.t<self.dtemp: # artefacts of a ATIS camera
             #print(f'small time difference between 2 events on the same pixel: {tev-self.t} ms')
             pass
         else:
             self.iev += 1
-            self.x, self.y, self.p = xev, yev, pev
+            self.x, self.y, self.p = xev, yev, polarities
             # updating the spatiotemporal surface
             if self.decay == 'exponential':
                 self.spatpmat = self.spatpmat*np.exp(-(tev-self.t)/self.tau)
@@ -66,7 +68,7 @@ class timesurface(object):
             elif self.decay == 'linear':
                 self.spatpmat = max(self.spatpmat-(tev-self.t)/self.tau,0)
             self.t = tev
-            self.spatpmat[self.p, self.x, self.y] = 1
+            self.spatpmat[self.p, self.x, self.y] = coefficients
             timesurf = self.getts()
 
             if self.sigma is not None:

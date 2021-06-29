@@ -29,21 +29,20 @@ class network(object):
                         # parameters of time-surfaces and datasets
                         tau = [1e1, 1e2, 1e3], #time constant for exponential decay in millisec
                         R = [2, 4, 8], # parameter defining the spatial size of the time surface
-                        decay = 'exponential', # among ['exponential', 'linear']
-                        nbpolcam = 2, # number of polarities for the event stream as input of the network
-                        camsize = (34, 34), # size of the pixel grid that recorded the event stream
-                        to_record = True, 
+                        to_record = True
                 ):
         self.name = name
         self.date = timestr
         if self.name == 'hots':
             # replicates methods from Lagorce et al. 2017
-            algo, krnlinit, homeo, sigma = 'lagorce', 'first', False, None
+            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'first', False, None, 'se'
         elif self.name == 'homhots':
             # replicates methods from Grimaldi et al. 2021
-            algo, krnlinit, homeo, sigma = 'lagorce', 'rdn', True, None
+            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'rdn', True, None, 'se'
             
-        tau *= 1e3 # to enter tau in ms
+        nbpolcam = 2 # number of polarities for the event stream as input of the network
+        camsize = [34,34] # size of the pixel grid that recorded the event stream
+        tau = np.array(tau)*1e3 # to enter tau in ms
         nblay = len(nbclust)
         if to_record:
             self.stats = [[]]*nblay
@@ -51,211 +50,89 @@ class network(object):
         self.L = [[]]*nblay
         for lay in range(nblay):
             if lay == 0:
-                self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbpolcam, sigma)
+                self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbpolcam, sigma, decay)
                 self.L[lay] = layer(R[lay], nbclust[lay], nbpolcam, homeo, algo, krnlinit, output, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
             else:
-                self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbclust[lay-1], pola, filt, sigma)
+                self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbclust[lay-1], sigma, decay)
                 self.L[lay] = layer(R[lay], nbclust[lay], nbclust[lay-1], homeo, algo, krnlinit, output, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
 
 ##___________________________________________________________________________________________
 
-    def load(self, dataset, trainset=True, jitonic=[None,None], subset_size = None, kfold = None, kfold_ind = None):
-
-        if jitonic[1] is not None:
-            print(f'spatial jitter -> var = {jitonic[1]}')
-            transform = tonic.transforms.Compose([tonic.transforms.SpatialJitter(variance_x=jitonic[1], variance_y=jitonic[1], sigma_x_y=0, integer_coordinates=True, clip_outliers=True)])
-
-        if jitonic[0] is not None:
-            print(f'time jitter -> var = {jitonic[0]}')
-            transform = tonic.transforms.Compose([tonic.transforms.TimeJitter(variance=jitonic[0], integer_timestamps=False, clip_negative=True, sort_timestamps=True)])
-
-        if jitonic == [None,None]:
-            print('no jitter')
-            transform = None
-
-        download=False
-        path = '../Data/'
-        if dataset == 'nmnist':
-            if trainset:
-                path+='Train/'
+    def running(self, mode='learn', dataset='nmnist', kfold = None, kfold_ind = None, ds_ev=None, maxevts=None, jitonic=[None,None], verbose = True):
+        
+        if mode=='learn':
+            trainset=True
+            learn=True
+        elif mode=='train':
+            trainset=True
+            learn=False
+        elif mode=='test':
+            trainset=False
+            learn=False
+        
+        loader, ordering, classes = load(dataset, trainset, jitonic, kfold, kfold_ind)
+        pbar = tqdm(total=len(loader))
+        x_index = ordering.find("x")
+        y_index = ordering.find("y")
+        t_index = ordering.find("t")
+        p_index = ordering.find("p")
+        for events, target in loader:
+            pbar.update(1)
+            for i in range(len(self.L)):
+                self.TS[i].spatpmat[:] = 0
+                self.TS[i].iev = 0
+                self.L[i].cumhisto[:] = 1
+                #self.stats[i].actmap[:] = 0
+            if ds_ev is not None:
+                events = events[:,::ds_ev,:]
+            if maxevts is not None:
+                N_max = min(maxevts, events.shape[1])
             else:
-                path+='Test/'
-            if not os.path.exists(path):
-                download=True
-
-            eventset = tonic.datasets.NMNIST(save_to='../Data/',
-                                train=trainset, download=download,
-                                transform=transform)
-        elif dataset == 'poker':
-            if trainset:
-                path+='pips_train/'
-            else:
-                path+='pips_test/'
-            if not os.path.exists(path):
-                download=True
-            eventset = tonic.datasets.POKERDVS(save_to='../Data/',
-                                train=trainset, download=download,
-                                transform=transform)
-        elif dataset == 'gesture':
-            if trainset:
-                path+='ibmGestureTrain/'
-            else:
-                path+='ibmGestureTest/'
-            if not os.path.exists(path):
-                download=True
-            eventset = tonic.datasets.DVSGesture(save_to='../Data/',
-                                train=trainset, download=download,
-                                transform=transform)
-        elif dataset == 'cars':
-            if trainset:
-                path+='ncars-train/'
-            else:
-                path+='ncars-test/'
-            if not os.path.exists(path):
-                download=True
-            eventset = tonic.datasets.NCARS(save_to='../Data/',
-                                train=trainset, download=download,
-                                transform=transform)
-        elif dataset == 'ncaltech':
-            eventset = tonic.datasets.NCALTECH101(save_to='../Data/',
-                                train=trainset, download=download,
-                                transform=transform)
-        else: print('incorrect dataset')
-
-        if subset_size is not None:
-            subset_indices = []
-            for i in range(len(eventset.classes)):
-                all_ind = np.where(np.array(eventset.targets)==i)[0]
-                subset_indices += all_ind[:subset_size//len(eventset.classes)].tolist()
-            g_cpu = Generator()
-            subsampler = SubsetRandomSampler(subset_indices, g_cpu)
-            loader = tonic.datasets.DataLoader(eventset, batch_size=1, shuffle=False, sampler=subsampler)
-        elif kfold is not None:
-            subset_indices = []
-            subset_size = len(testset)//kfold
-            for i in range(len(testset.classes)):
-                all_ind = np.where(np.array(testset.targets)==i)[0]
-                subset_indices += all_ind[kfold_ind*subset_size//len(testset.classes):
-                            min((kfold_ind+1)*subset_size//len(testset.classes), len(testset)-1)].tolist()
-            g_cpu = Generator()
-            subsampler = SubsetRandomSampler(subset_indices, g_cpu)
-            loader = tonic.datasets.DataLoader(testset, batch_size=1, shuffle=False, sampler=subsampler)
-        else:
-            loader = tonic.datasets.DataLoader(eventset, shuffle=True)
-
-        if eventset.sensor_size!=self.TS[0].camsize:
-            print('sensor formatting...')
-            self.sensformat(eventset.sensor_size)
-
-        return loader, eventset.ordering, eventset.classes
-
-    def sensformat(self,sensor_size):
-        for i in range(1,len(self.TS)):
-            self.TS[i].camsize = sensor_size
-            self.TS[i].spatpmat = np.zeros((self.L[i-1].kernel.shape[1],sensor_size[0]+1,sensor_size[1]+1))
-            self.stats[i].actmap = np.zeros((self.L[i-1].kernel.shape[1],sensor_size[0]+1,sensor_size[1]+1))
-        self.TS[0].camsize = sensor_size
-        self.TS[0].spatpmat = np.zeros((2,sensor_size[0]+1,sensor_size[1]+1))
-        self.stats[0].actmap = np.zeros((2,sensor_size[0]+1,sensor_size[1]+1))
-
-    def learning1by1(self, nb_digit=10, dataset='nmnist', diginit=True, filtering=None, jitonic=[None,None], maxevts=None, subset_size = None, kfold = None, kfold_ind = None, ds_ev = None, verbose=True):
-        self.onbon = True
-        model = self.load_model(dataset, verbose)
-        if model:
-            return model
-        else:
-            loader, ordering, classes = self.load(dataset, jitonic=jitonic, subset_size=subset_size)
-            nbclass = len(classes)
-            #eventslist = [next(iter(loader))[0] for i in range(nb_digit)]
-            eventslist = []
-            nbloadz = np.zeros([nbclass])
-            while np.sum(nbloadz)<nb_digit*nbclass:
-                loadev, loadtar = next(iter(loader))
-                if nbloadz[loadtar]<nb_digit:
-                    eventslist.append(loadev)
-                    nbloadz[loadtar]+=1
-
-            for n in range(len(self.L)):
-                pbar = tqdm(total=nb_digit*nbclass)
-                for idig in range(nb_digit*nbclass):
-                    pbar.update(1)
-                    events = eventslist[idig]
-
-                    if dataset=='cars':
-                        size_x = max(events[0,:,ordering.find("x")])-min(events[0,:,ordering.find("x")])
-                        size_y = max(events[0,:,ordering.find("y")])-min(events[0,:,ordering.find("y")])
-                        self.sensformat((int(size_x.item()),int(size_y.item())))
-                        events[0,:,ordering.find("x")] -= min(events[0,:,ordering.find("x")]).numpy()
-                        events[0,:,ordering.find("y")] -= min(events[0,:,ordering.find("y")]).numpy()
-                    if diginit:
-                        for l in range(n+1):
-                            self.TS[l].spatpmat[:] = 0
-                            self.TS[l].iev = 0
-                    if ds_ev is not None:
-                        events = events[:,::ds_ev,:]
-                    if maxevts is not None:
-                        N_max = min(maxevts, events.shape[1])
+                N_max = events.shape[1]
+            if dataset=='cars':
+                size_x = max(events[0,:,x_index])-min(events[0,:,x_index])
+                size_y = max(events[0,:,y_index])-min(events[0,:,y_index])
+                self.sensformat((int(size_x.item()),int(size_y.item())))
+                events[0,:,x_index] -= min(events[0,:,x_index]).numpy()
+                events[0,:,y_index] -= min(events[0,:,y_index]).numpy()
+            for iev in range(N_max):
+                p = np.zeros([self.TS[0].spatpmat.shape[0]])
+                x, y, t, p[int(events[0][iev][p_index].item())] = int(events[0][iev][x_index].item()), int(events[0][iev][y_index].item()), int(events[0][iev][t_index].item()), 1
+                #print(p,int(events[0][iev][p_index].item()))
+                for lay in range(len(self.L)):
+                    timesurf = self.TS[lay].addevent(x, y, t, p)
+                    if len(timesurf)>0:
+                        p = self.L[lay].run(timesurf, learn)
                     else:
-                        N_max = events.shape[1]
+                        break
+        pbar.close()
+            
 
-                    for iev in range(N_max):
-                        x,y,t,p =   events[0,iev,ordering.find("x")].item(), \
-                                    events[0,iev,ordering.find("y")].item(), \
-                                    events[0,iev,ordering.find("t")].item(), \
-                                    events[0,iev,ordering.find("p")].item()
-                        lay=0
-                        while lay < n+1:
-                            if lay==n:
-                                learn=True
-                            else:
-                                learn=False
-                            timesurf, activ = self.TS[lay].addevent(x, y, t, p)
-                            if lay==0 or filtering=='all':
-                                activ2=activ
-                            if activ2 and np.sum(timesurf)>0:
-                            #if activ==True:
-                                p, dist = self.L[lay].run(timesurf, learn)
-                                if learn:
-                                    self.stats[lay].update(p, self.L[lay].kernel, timesurf, dist)
-                                if self.jitter:
-                                    x,y = spatial_jitter(x,y,self.TS[0].camsize)
-                                lay += 1
-                            else:
-                                lay = n+1
-                pbar.close()
-            for l in range(len(self.L)):
-                self.stats[l].histo = self.L[l].cumhisto.copy()
-            self.save_model(dataset)
-            return self
+    def learningall(self, nb_digit=10, train=True, dataset='nmnist', diginit=True, ds_ev=None, maxevts=None, kfold = None, kfold_ind = None, outstyle='histo', verbose=True):
 
-    def learningall(self, nb_digit=10, dataset='nmnist', diginit=True, jitonic=[None,None], maxevts = None, subset_size=None, kfold = None, kfold_ind = None, ds_ev = None, verbose=True):
-
-        self.onbon = False
         model = self.load_model(dataset, verbose)
         if model:
             return model
         else:
-            loader, ordering, classes = self.load(dataset, jitonic=jitonic, subset_size=subset_size)
+            loader, ordering, classes = self.load(dataset)
             nbclass = len(classes)
             pbar = tqdm(total=nb_digit*nbclass)
             nbloadz = np.zeros([nbclass])
             while np.sum(nbloadz)<nb_digit*nbclass:
                 if diginit:
                     for i in range(len(self.L)):
-                        self.TS[i].spatpmat[:] = 0
-                        self.TS[i].iev = 0
+                        self.TS[i].spatpmat[:], self.TS[i].iev = 0, 0
                 events, target = next(iter(loader))
-
                 if nbloadz[target]<nb_digit:
                     nbloadz[target]+=1
                     pbar.update(1)
-                    if ds_ev is not None:
+                    if ds_ev:
                         events = events[:,::ds_ev,:]
-                    if maxevts is not None:
+                    if maxevts:
                         N_max = min(maxevts, events.shape[1])
                     else:
                         N_max = events.shape[1]
@@ -265,122 +142,30 @@ class network(object):
                         self.sensformat((int(size_x.item()),int(size_y.item())))
                         events[0,:,ordering.find("x")] -= min(events[0,:,ordering.find("x")]).numpy()
                         events[0,:,ordering.find("y")] -= min(events[0,:,ordering.find("y")]).numpy()
+                        
                     for iev in range(N_max):
                         self.run(events[0][iev][ordering.find("x")].item(), \
                                  events[0][iev][ordering.find("y")].item(), \
                                  events[0][iev][ordering.find("t")].item(), \
                                  events[0][iev][ordering.find("p")].item(), \
-                                 learn=True, to_record=True)
-                        #if self.TS[0].iev%1000==0:
-                        #    self.TS[0].plote()
+                                 learn=True)
             pbar.close()
             for l in range(len(self.L)):
                 self.stats[l].histo = self.L[l].cumhisto.copy()
+                
             self.save_model(dataset)
             return self
 
-    def running(self, homeotest=False, train=True, outstyle='histo', nb_digit=500, jitonic=[None,None], dataset='nmnist', maxevts = None, subset_size=None, kfold = None, kfold_ind = None, ds_ev = None, to_record=False, verbose=True):
-
-        output, loaded = self.load_output(dataset, homeotest, nb_digit, train, jitonic, outstyle, kfold_ind, verbose)
-        if loaded:
-            return output
-        else:
-            loader, ordering, classes = self.load(dataset, trainset=train, jitonic=jitonic, subset_size=subset_size)
-            nbclass = len(classes)
-            homeomod = self.L[0].homeo
-            for i in range(len(self.L)):
-                self.L[i].homeo=homeotest
-            pbar = tqdm(total=nb_digit)
-            timout = []
-            xout = []
-            yout = []
-            polout = []
-            labout = []
-            labelmap = []
-
-            labelmapav = np.zeros([nbclass, len(self.L[-1].cumhisto)])
-            labelcount = np.zeros(nbclass)
-
-            x_index = ordering.find("x")
-            y_index = ordering.find("y")
-            t_index = ordering.find("t")
-            p_index = ordering.find("p")
-
-            for events, target in loader:
-                for i in range(len(self.L)):
-                    self.TS[i].spatpmat[:] = 0
-                    self.TS[i].iev = 0
-                    self.L[i].cumhisto[:] = 1
-                    #self.stats[i].actmap[:] = 0
-                pbar.update(1)
-                if ds_ev is not None:
-                    events = events[:,::ds_ev,:]
-                if maxevts is not None:
-                    N_max = min(maxevts, events.shape[1])
-                else:
-                    N_max = events.shape[1]
-                if dataset=='cars':
-                    size_x = max(events[0,:,ordering.find("x")])-min(events[0,:,ordering.find("x")])
-                    size_y = max(events[0,:,ordering.find("y")])-min(events[0,:,ordering.find("y")])
-                    self.sensformat((int(size_x.item()),int(size_y.item())))
-                    events[0,:,ordering.find("x")] -= min(events[0,:,ordering.find("x")]).numpy()
-                    events[0,:,ordering.find("y")] -= min(events[0,:,ordering.find("y")]).numpy()
-
-                for iev in range(N_max):
-                    
-                    out, activout = self.run(events[0][iev][x_index].item(), \
-                                            events[0][iev][y_index].item(), \
-                                            events[0][iev][t_index].item(), \
-                                            events[0][iev][p_index].item(), \
-                                            to_record=to_record)
-                    if outstyle=='LR' and activout:
-                        xout.append(out[0])
-                        yout.append(out[1])
-                        timout.append(out[2])
-                        polout.append(out[3])
-                        labout.append(target.item())
-
-                if train:
-                    labelmapav[target.item(),:] += self.L[-1].cumhisto.copy()/np.sum(self.L[-1].cumhisto.copy())
-                    labelcount[target.item()] += 1
-                    for i in range(len(labelcount)):
-                        labelmapav[i,:] /= max(labelcount[i],1)
-                data = (target.item(),self.L[-1].cumhisto.copy()/np.sum(self.L[-1].cumhisto.copy()))
-                labelmap.append(data)
-
-            for i in range(len(self.L)):
-                self.L[i].homeo=homeomod
-
-            pbar.close()
-
-            if train:
-                self.save_output(labelmapav, homeotest, dataset, nb=nb_digit, train=train, jitonic=jitonic, outstyle='histav', kfold_ind=kfold_ind)
-            self.save_output(labelmap, homeotest, dataset, nb=nb_digit, train=train, jitonic=jitonic, outstyle='histo', kfold_ind=kfold_ind)
-
-            if outstyle=='LR':
-                camsize = self.TS[-1].camsize
-                nbpola = self.L[-1].kernel.shape[1]
-                eventsout = [xout,yout,timout,polout,labout,camsize,nbpola]
-                self.save_output(eventsout, homeotest, dataset, nb=nb_digit, train=train, jitonic=jitonic, outstyle='LR', kfold_ind=kfold_ind)
-                output = eventsout
-            elif outstyle=='histo':
-                output = labelmap
-            elif outstyle=='histav':
-                output = labelmapav
-            return output
-
-    def run(self, x, y, t, p, learn=False, to_record=False):
+    def run(self, x, y, t, p, learn=False):
         lay = 0
         activout=False
         while lay<len(self.TS):
-            timesurf, activ = self.TS[lay].addevent(x, y, t, p)
+            timesurf = self.TS[lay].addevent(x, y, t, p)
             if activ:
                 p, dist = self.L[lay].run(timesurf, learn)
                 if to_record:
                     self.stats[lay].update(p, self.L[lay].kernel, timesurf, dist)
                     #self.stats[lay].actmap[int(np.argmax(p)),self.TS[lay].x,self.TS[lay].y]=1
-                if self.jitter:
-                    x,y = spatial_jitter(x,y,self.TS[0].camsize)
                 lay+=1
                 if lay==len(self.TS):
                     activout=True
@@ -403,6 +188,15 @@ class network(object):
         f_name = f'{timestr}_{algo}_{krnlinit}_{sigma}_{homeo}_{homparam}_{arch}_{tau}_{R}_{onebyone}'
         self.name = f_name
         return f_name
+    
+    def sensformat(self,sensor_size):
+        for i in range(1,len(self.TS)):
+            self.TS[i].camsize = sensor_size
+            self.TS[i].spatpmat = np.zeros((self.L[i-1].kernel.shape[1],sensor_size[0]+1,sensor_size[1]+1))
+            self.stats[i].actmap = np.zeros((self.L[i-1].kernel.shape[1],sensor_size[0]+1,sensor_size[1]+1))
+        self.TS[0].camsize = sensor_size
+        self.TS[0].spatpmat = np.zeros((2,sensor_size[0]+1,sensor_size[1]+1))
+        self.stats[0].actmap = np.zeros((2,sensor_size[0]+1,sensor_size[1]+1))
 
     def save_model(self, dataset):
         if dataset=='nmnist':
@@ -499,248 +293,6 @@ class network(object):
         return output, loaded
 
 
-##___________REPRODUCING RESULTS FROM LAGORCE 2017___________________________________________
-##___________________________________________________________________________________________
-
-    def learninglagorce(self, nb_cycle=3, diginit=True, filtering=None):
-
-
-        #___________ SPECIAL CASE OF SIMPLE_ALPHABET DATASET _________________
-
-        path = "../Data/alphabet_ExtractedStabilized.mat"
-
-        image_list = [1, 32, 19, 22, 29]
-        for i in range(nb_cycle-1):
-            image_list += image_list
-        address, time, polarity, list_pola = LoadFromMat(path, image_number=image_list)
-
-        #___________ SPECIAL CASE OF SIMPLE_ALPHABET DATASET _________________
-
-        nbevent = int(time.shape[0])
-        for n in range(len(self.L)):
-            count = 0
-            pbar = tqdm(total=nbevent)
-            while count<nbevent:
-                pbar.update(1)
-                x,y,t,p = address[count,0],address[count,1], time[count],polarity[count]
-                if diginit and time[count]<time[count-1]:
-                    for i in range(n+1):
-                        self.TS[i].spatpmat[:] = 0
-                        self.TS[i].iev = 0
-                lay=0
-                while lay < n+1:
-                    if lay==n:
-                        learn=True
-                    else:
-                        learn=False
-                    timesurf, activ = self.TS[lay].addevent(x, y, t, p)
-                    if lay==0 or filtering=='all':
-                        activ2=activ
-                    if activ2 and np.sum(timesurf)>0:
-                        p, dist = self.L[lay].run(timesurf, learn)
-                        if learn:
-                            self.stats[lay].update(p, self.L[lay].kernel, timesurf, dist)
-                        lay += 1
-                    else:
-                        lay = n+1
-                count += 1
-            for l in range(len(self.L)):
-                self.stats[l].histo = self.L[l].cumhisto.copy()
-            pbar.close()
-
-    def traininglagorce(self, nb_digit=None, outstyle = 'histo', to_record=True):
-        
-        class_data = {
-    "A": 0,
-    "B": 1,
-    "C": 2,
-    "D": 3,
-    "E": 4,
-    "F": 5,
-    "G": 6,
-    "H": 7,
-    "I": 8,
-    "J": 9,
-    "K": 10,
-    "L": 11,
-    "M": 12,
-    "N": 13,
-    "O": 14,
-    "P": 15,
-    "Q": 16,
-    "R": 17,
-    "S": 18,
-    "T": 19,
-    "U": 20,
-    "V": 21,
-    "W": 22,
-    "X": 23,
-    "Y": 24,
-    "Z": 25,
-    "0": 26,
-    "1": 27,
-    "2": 28,
-    "3": 29,
-    "4": 30,
-    "5": 31,
-    "6": 32,
-    "7": 33,
-    "8": 34,
-    "9": 35,
-}
-        
-        path = "../Data/alphabet_ExtractedStabilized.mat"
-        nblist = 36
-        image_list=list(np.arange(0, nblist))
-        address, time, polarity, list_pola = LoadFromMat(path, image_number=image_list)
-        with open('../Data/alphabet_label.pkl', 'rb') as file:
-            label_list = pickle.load(file)
-        label = label_list[:nblist]
-
-        learn=False
-        output = []
-        count = 0
-        count2 = 0
-        nbevent = int(time.shape[0])
-        pbar = tqdm(total=nbevent)
-        idx = 0
-        labelmap = []
-        timout = []
-        xout = []
-        yout = []
-        polout = []
-        labout = []
-        for i in range(len(self.L)):
-            self.TS[i].spatpmat[:] = 0
-            self.TS[i].iev = 0
-            self.L[i].cumhisto[:] = 1
-
-        while count<nbevent:
-            pbar.update(1)
-            out, activout = self.run(address[count,0],address[count,1],time[count],polarity[count], learn, to_record)
-            if outstyle=='LR' and activout:
-                xout.append(out[0])
-                yout.append(out[1])
-                timout.append(out[2])
-                polout.append(out[3])
-                labout.append(class_data[label[idx][0]])
-                
-            if count2==label[idx][1]:
-                data = (label[idx][0],self.L[-1].cumhisto.copy())
-                labelmap.append(data)
-                for i in range(len(self.L)):
-                    self.TS[i].spatpmat[:] = 0
-                    self.TS[i].iev = 0
-                    self.L[i].cumhisto[:] = 1
-                idx += 1
-                count2=-1
-            count += 1
-            count2 += 1
-        pbar.close()
-        if outstyle=='LR':
-            camsize = self.TS[-1].camsize
-            nbpola = self.L[-1].kernel.shape[1]
-            eventsout = [xout,yout,timout,polout,labout,camsize,nbpola]
-            self.date = '2020-12-01'
-            self.save_output(eventsout, False, 'barrel', len(label), True, None, 'LR', None)
-        return labelmap
-
-    def testinglagorce(self, nb_digit=None, outstyle = 'histo', to_record=True):
-        
-        class_data = {
-    "A": 0,
-    "B": 1,
-    "C": 2,
-    "D": 3,
-    "E": 4,
-    "F": 5,
-    "G": 6,
-    "H": 7,
-    "I": 8,
-    "J": 9,
-    "K": 10,
-    "L": 11,
-    "M": 12,
-    "N": 13,
-    "O": 14,
-    "P": 15,
-    "Q": 16,
-    "R": 17,
-    "S": 18,
-    "T": 19,
-    "U": 20,
-    "V": 21,
-    "W": 22,
-    "X": 23,
-    "Y": 24,
-    "Z": 25,
-    "0": 26,
-    "1": 27,
-    "2": 28,
-    "3": 29,
-    "4": 30,
-    "5": 31,
-    "6": 32,
-    "7": 33,
-    "8": 34,
-    "9": 35,
-}
-        
-        path = "../Data/alphabet_ExtractedStabilized.mat"
-        image_list=list(np.arange(36, 76))
-        address, time, polarity, list_pola = LoadFromMat(path, image_number=image_list)
-        with open('../Data/alphabet_label.pkl', 'rb') as file:
-            label_list = pickle.load(file)
-        label = label_list[36:76]
-
-        learn = False
-        output = []
-        count = 0
-        count2 = 0
-        nbevent = int(time.shape[0])
-        pbar = tqdm(total=nbevent)
-        idx = 0
-        labelmap = []
-        timout = []
-        xout = []
-        yout = []
-        polout = []
-        labout = []
-        for i in range(len(self.L)):
-            self.TS[i].spatpmat[:] = 0
-            self.TS[i].iev = 0
-            self.L[i].cumhisto[:] = 1
-        while count<nbevent:
-            pbar.update(1)
-            out, activout = self.run(address[count,0],address[count,1],time[count],polarity[count], learn, to_record)
-            if outstyle=='LR' and activout:
-                xout.append(out[0])
-                yout.append(out[1])
-                timout.append(out[2])
-                polout.append(out[3])
-                labout.append(class_data[label[idx][0]])
-            if count2==label[idx][1]:
-                data = (label[idx][0],self.L[-1].cumhisto.copy())
-                labelmap.append(data)
-                for i in range(len(self.L)):
-                    self.TS[i].spatpmat[:] = 0
-                    self.TS[i].iev = 0
-                    self.L[i].cumhisto[:] = 1
-                idx += 1
-                count2=-1
-            count += 1
-            count2 += 1
-
-        pbar.close()
-        if outstyle=='LR':
-            camsize = self.TS[-1].camsize
-            nbpola = self.L[-1].kernel.shape[1]
-            eventsout = [xout,yout,timout,polout,labout,camsize,nbpola]
-            self.date = '2020-12-01'
-            self.save_output(eventsout, False, 'barrel', len(label), False, None, 'LR', None)
-
-        return labelmap
-
 ##___________________PLOTTING________________________________________________________________
 ##___________________________________________________________________________________________
 
@@ -767,13 +319,13 @@ class network(object):
 
         for i in range(len(self.L)):
             ax = fig.add_subplot(gs[:hisiz, int(np.sum(N[:i]))+1*i:int(np.sum(N[:i+1]))+i*1])
-            plt.bar(np.arange(N[i]), self.stats[i].histo/np.sum(self.stats[i].histo), width=1, align='edge', ec="k")
+            plt.bar(np.arange(N[i]), self.L[i].cumhisto/np.sum(self.L[i].cumhisto), width=1, align='edge', ec="k")
             ax.set_xticks(())
             #if i>0:
                 #ax.set_yticks(())
             ax.set_title('Layer '+str(i+1), fontsize=16)
             plt.xlim([0,N[i]])
-            yhis = 1.1*max(self.stats[i].histo/np.sum(self.stats[i].histo))
+            yhis = 1.1*max(self.L[i].cumhisto/np.sum(self.L[i].cumhisto))
             plt.ylim([0,yhis])
 
         #f3_ax1.set_title('gs[0, :]')
@@ -835,52 +387,84 @@ class network(object):
                 axi.set_yticks(())
 
 
-#__________________OLD_CODE___________________________________________________________________________
-#_____________________________________________________________________________________________________
+def load(dataset, trainset, jitonic, kfold, kfold_ind):
 
-def LoadFromMat(path, image_number, OutOnePolarity=False, verbose=0):
-    '''
-            Load Events from a .mat file. Only the events contained in ListPolarities are kept:
-            INPUT
-                + path : a string which is the path of the .mat file (ex : './data_cache/alphabet_ExtractedStabilized.mat')
-                + image_number : list with all the numbers of image to load
-    '''
-    from scipy import io
-    obj = io.loadmat(path)
-    ROI = obj['ROI'][0]
+    #_______ADDING JITTER_________
+    transform = None
+    if jitonic[1] is not None:
+        print(f'spatial jitter -> var = {jitonic[1]}')
+        transform = tonic.transforms.Compose([tonic.transforms.SpatialJitter(variance_x=jitonic[1], variance_y=jitonic[1], sigma_x_y=0, integer_coordinates=True, clip_outliers=True)])
 
-    if type(image_number) is int:
-        image_number = [image_number]
-    elif type(image_number) is not list:
-        raise TypeError(
-                    'the type of argument image_number should be int or list')
-    if verbose > 0:
-        print("loading images {0}".format(image_number))
-    Total_size = 0
-    for idx, each_image in enumerate(image_number):
-        image = ROI[each_image][0, 0]
-        Total_size += image[1].shape[1]
-
-    address = np.zeros((Total_size, 2)).astype(int)
-    time = np.zeros((Total_size))
-    polarity = np.zeros((Total_size))
-    first_idx = 0
-
-    for idx, each_image in enumerate(image_number):
-        image = ROI[each_image][0, 0]
-        last_idx = first_idx + image[0].shape[1]
-        address[first_idx:last_idx, 0] = (image[1] - 1).astype(int)
-        address[first_idx:last_idx, 1] = (image[0] - 1).astype(int)
-        time[first_idx:last_idx] = (image[3] * 1e-6)
-        polarity[first_idx:last_idx] = image[2].astype(int)
-        first_idx = last_idx
-
-    polarity[polarity.T == -1] = 0
-    polarity = polarity.astype(int)
-            # Filter only the wanted polarity
-    ListPolarities = np.unique(polarity)
-    if OutOnePolarity == True:
-        polarity = np.zeros_like(polarity)
-        ListPolarities = [0]
-
-    return address, time, polarity, ListPolarities
+    if jitonic[0] is not None:
+        print(f'time jitter -> var = {jitonic[0]}')
+        transform = tonic.transforms.Compose([tonic.transforms.TimeJitter(variance=jitonic[0], integer_timestamps=False, clip_negative=True, sort_timestamps=True)])
+    #_____________________________
+         
+    #_______GETTING DATASET_______    
+    download=False
+    path = '../Data/'
+    if dataset == 'nmnist':
+        if trainset:
+            path+='Train/'
+        else:
+            path+='Test/'
+        if not os.path.exists(path):
+            download=True
+        eventset = tonic.datasets.NMNIST(save_to='../Data/',
+                                train=trainset, download=download,
+                                transform=transform)
+            
+    elif dataset == 'poker':
+        if trainset:
+            path+='pips_train/'
+        else:
+            path+='pips_test/'
+        if not os.path.exists(path):
+            download=True
+        eventset = tonic.datasets.POKERDVS(save_to='../Data/',
+                                train=trainset, download=download,
+                                transform=transform)
+    elif dataset == 'gesture':
+        if trainset:
+            path+='ibmGestureTrain/'
+        else:
+            path+='ibmGestureTest/'
+        if not os.path.exists(path):
+            download=True
+        eventset = tonic.datasets.DVSGesture(save_to='../Data/',
+                                train=trainset, download=download,
+                                transform=transform)
+    elif dataset == 'cars':
+        if trainset:
+            path+='ncars-train/'
+        else:
+            path+='ncars-test/'
+        if not os.path.exists(path):
+            download=True
+        eventset = tonic.datasets.NCARS(save_to='../Data/',
+                                train=trainset, download=download,
+                                transform=transform)
+    elif dataset == 'ncaltech':
+        eventset = tonic.datasets.NCALTECH101(save_to='../Data/',
+                                train=trainset, download=download,
+                                transform=transform)
+    else: print('problem with dataset')
+    #_____________________________
+        
+        
+    #_______BUILDING LOADER_______  
+    if kfold:
+        subset_indices = []
+        subset_size = len(eventset)//kfold
+        for i in range(len(eventset.classes)):
+            all_ind = np.where(np.array(eventset.targets)==i)[0]
+            subset_indices += all_ind[kfold_ind*subset_size//len(eventset.classes):
+                            min((kfold_ind+1)*subset_size//len(eventset.classes), len(eventset)-1)].tolist()
+        g_cpu = Generator()
+        subsampler = SubsetRandomSampler(subset_indices, g_cpu)
+        loader = tonic.datasets.DataLoader(eventset, batch_size=1, shuffle=False, sampler=subsampler)
+    else:
+        loader = tonic.datasets.DataLoader(eventset, shuffle=True)
+    #_____________________________
+    return loader, eventset.ordering, eventset.classes
+    
