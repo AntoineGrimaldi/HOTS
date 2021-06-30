@@ -8,7 +8,7 @@ import tonic
 import os
 import pickle
 from torch import Generator
-from torch.utils.data import SubsetRandomSampler
+from torch.utils.data import SubsetRandomSampler, DataLoader
 
 class network(object):
     """network is an Hierarchical network described in Lagorce et al. 2017 (HOTS). It loads event stream with the tonic package.
@@ -35,7 +35,7 @@ class network(object):
         self.date = timestr
         if self.name == 'hots':
             # replicates methods from Lagorce et al. 2017
-            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'first', False, None, 'se'
+            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'rdn', False, None, 'se'
         elif self.name == 'homhots':
             # replicates methods from Grimaldi et al. 2021
             algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'rdn', True, None, 'se'
@@ -462,9 +462,9 @@ def load(dataset, trainset, jitonic, kfold, kfold_ind):
                             min((kfold_ind+1)*subset_size//len(eventset.classes), len(eventset)-1)].tolist()
         g_cpu = Generator()
         subsampler = SubsetRandomSampler(subset_indices, g_cpu)
-        loader = tonic.datasets.DataLoader(eventset, batch_size=1, shuffle=False, sampler=subsampler)
+        loader = DataLoader(eventset, batch_size=1, shuffle=False, sampler=subsampler)
     else:
-        loader = tonic.datasets.DataLoader(eventset, shuffle=True)
+        loader = DataLoader(eventset, shuffle=True)
     #_____________________________
     return loader, eventset.ordering, eventset.classes
     
