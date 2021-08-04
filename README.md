@@ -1,6 +1,6 @@
-# HOTS
+# neuronhots
 
-Python code to replicate [HOTS: A Hierarchy of Event-Based Time-Surfaces for Pattern Recognition](https://ieeexplore.ieee.org/abstract/document/7508476) by *Xavier Lagorce, Garrick Orchard, Francesco Galluppi, Bertram E. Shi and Ryad B. Benosman*.
+A bio-plausible version of [HOTS: A Hierarchy of Event-Based Time-Surfaces for Pattern Recognition](https://ieeexplore.ieee.org/abstract/document/7508476)
 
 ## Requirements :
 Running the HOTS library requires the following packages :
