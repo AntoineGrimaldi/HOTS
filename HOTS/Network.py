@@ -35,7 +35,7 @@ class network(object):
         self.date = timestr
         if self.name == 'hots':
             # replicates methods from Lagorce et al. 2017
-            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'rdn', False, None, 'se'
+            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'first', False, None, 'se'
         elif self.name == 'homhots':
             # replicates methods from Grimaldi et al. 2021
             algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'rdn', True, None, 'se'
@@ -72,19 +72,21 @@ class network(object):
         pbar = tqdm(total=len(loader))
         
         for events, target in loader:
+            events = events.squeeze()
             pbar.update(1)
             for i in range(len(self.L)):
                 self.TS[i].spatpmat[:] = 0
                 self.TS[i].iev = 0
                 self.L[i].cumhisto[:] = 1
                 #self.stats[i].actmap[:] = 0
-            for iev in range(N_max):
-                p = np.zeros([self.TS[0].spatpmat.shape[0]])
-                x, y, t, p[int(events[0][iev][p_index].item())] = int(events[0][iev][x_index].item()), int(events[0][iev][y_index].item()), int(events[0][iev][t_index].item()), 1
+            for iev in range(len(events)):
+                x, y, t, p = int(events[iev][x_index].item()), int(events[iev][y_index].item()), int(events[iev][t_index].item()), int(events[iev][p_index].item())
                 for lay in range(len(self.L)):
                     timesurf = self.TS[lay].addevent(x, y, t, p)
                     if len(timesurf)>0:
                         p = self.L[lay].run(timesurf, learn)
+                        #if lay==len(self.TS):
+                            # append p 
                     else:
                         break
         pbar.close()
