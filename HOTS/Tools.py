@@ -1,4 +1,4 @@
-from Network import network, LoadFromMat
+from HOTS.Network import network
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader, SubsetRandomSampler
 import pickle

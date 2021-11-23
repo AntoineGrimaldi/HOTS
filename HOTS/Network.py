@@ -62,24 +62,15 @@ class network(object):
 
 ##___________________________________________________________________________________________
 
-    def running(self, mode='learn', dataset='nmnist', kfold = None, kfold_ind = None, ds_ev=None, maxevts=None, jitonic=[None,None], verbose = True):
+    def running(self, loader, indices, classes, learn=False, verbose = True):
         
-        if mode=='learn':
-            trainset=True
-            learn=True
-        elif mode=='train':
-            trainset=True
-            learn=False
-        elif mode=='test':
-            trainset=False
-            learn=False
+        x_index = indices.index('x')
+        y_index = indices.index('y')
+        t_index = indices.index('t')
+        p_index = indices.index('p')
         
-        loader, ordering, classes = load(dataset, trainset, jitonic, kfold, kfold_ind)
         pbar = tqdm(total=len(loader))
-        x_index = ordering.find("x")
-        y_index = ordering.find("y")
-        t_index = ordering.find("t")
-        p_index = ordering.find("p")
+        
         for events, target in loader:
             pbar.update(1)
             for i in range(len(self.L)):
@@ -87,22 +78,9 @@ class network(object):
                 self.TS[i].iev = 0
                 self.L[i].cumhisto[:] = 1
                 #self.stats[i].actmap[:] = 0
-            if ds_ev is not None:
-                events = events[:,::ds_ev,:]
-            if maxevts is not None:
-                N_max = min(maxevts, events.shape[1])
-            else:
-                N_max = events.shape[1]
-            if dataset=='cars':
-                size_x = max(events[0,:,x_index])-min(events[0,:,x_index])
-                size_y = max(events[0,:,y_index])-min(events[0,:,y_index])
-                self.sensformat((int(size_x.item()),int(size_y.item())))
-                events[0,:,x_index] -= min(events[0,:,x_index]).numpy()
-                events[0,:,y_index] -= min(events[0,:,y_index]).numpy()
             for iev in range(N_max):
                 p = np.zeros([self.TS[0].spatpmat.shape[0]])
                 x, y, t, p[int(events[0][iev][p_index].item())] = int(events[0][iev][x_index].item()), int(events[0][iev][y_index].item()), int(events[0][iev][t_index].item()), 1
-                #print(p,int(events[0][iev][p_index].item()))
                 for lay in range(len(self.L)):
                     timesurf = self.TS[lay].addevent(x, y, t, p)
                     if len(timesurf)>0:
@@ -401,52 +379,26 @@ def load(dataset, trainset, jitonic, kfold, kfold_ind):
     #_____________________________
          
     #_______GETTING DATASET_______    
-    download=False
     path = '../Data/'
     if dataset == 'nmnist':
-        if trainset:
-            path+='Train/'
-        else:
-            path+='Test/'
-        if not os.path.exists(path):
-            download=True
         eventset = tonic.datasets.NMNIST(save_to='../Data/',
-                                train=trainset, download=download,
+                                train=trainset,
                                 transform=transform)
-            
     elif dataset == 'poker':
-        if trainset:
-            path+='pips_train/'
-        else:
-            path+='pips_test/'
-        if not os.path.exists(path):
-            download=True
         eventset = tonic.datasets.POKERDVS(save_to='../Data/',
-                                train=trainset, download=download,
+                                train=trainset,
                                 transform=transform)
     elif dataset == 'gesture':
-        if trainset:
-            path+='ibmGestureTrain/'
-        else:
-            path+='ibmGestureTest/'
-        if not os.path.exists(path):
-            download=True
         eventset = tonic.datasets.DVSGesture(save_to='../Data/',
-                                train=trainset, download=download,
+                                train=trainset,
                                 transform=transform)
     elif dataset == 'cars':
-        if trainset:
-            path+='ncars-train/'
-        else:
-            path+='ncars-test/'
-        if not os.path.exists(path):
-            download=True
         eventset = tonic.datasets.NCARS(save_to='../Data/',
-                                train=trainset, download=download,
+                                train=trainset,
                                 transform=transform)
     elif dataset == 'ncaltech':
         eventset = tonic.datasets.NCALTECH101(save_to='../Data/',
-                                train=trainset, download=download,
+                                train=trainset,
                                 transform=transform)
     else: print('problem with dataset')
     #_____________________________
