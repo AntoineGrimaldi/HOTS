@@ -6,10 +6,11 @@ class layer(object):
     """layer makes the computations within a layer of the HOTS network based on the methods from Lagorce et al. 2017, Maro et al. 2020 or the Matching Pursuit algorithm.
     """
     
-    def __init__(self, R, N_clust, nbpola, homeo, algo, krnlinit, output, to_record):
+    def __init__(self, R, N_clust, nbpola, homeo, algo, krnlinit, to_record):
         self.to_record = to_record 
         self.R = R               
-        self.homeo = homeo       # boolean indicating if homeostasis is used or not
+        self.homeo = homeo       # gives the parameters of the homeostasis rule (None if no homeostasis)
+        self.algo = algo
         self.nbtrain = 0         # number of TS sent in the layer
         self.krnlinit = krnlinit # initialization of the kernels, can be 'rdn' (random) or 'first' (based on the first inputs)
         self.kernel = np.random.rand(nbpola*(2*R+1)**2, N_clust)
@@ -22,9 +23,9 @@ class layer(object):
         histo = self.cumhisto.copy()
         histo/=np.sum(histo)
 
-        homparam = [.25, 1]
-        gain = np.exp(homparam[0]*(self.kernel.shape[1]**homparam[1])*(1-histo*self.kernel.shape[1]))
+        gain = np.exp(self.homeo[0]*self.kernel.shape[1]**self.homeo[1]*(1-histo*self.kernel.shape[1]))
         return gain
+        
     
 ##____________DIFFERENT METHODS________________________________________________________
     

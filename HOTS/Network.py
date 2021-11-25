@@ -13,8 +13,6 @@ from torch.utils.data import SubsetRandomSampler, DataLoader
 class network(object):
     """network is an Hierarchical network described in Lagorce et al. 2017 (HOTS). It loads event stream with the tonic package.
     METHODS: .load -> loads datasets thanks to tonic package built on Pytorch.
-             .learning1by1 -> makes the unsupervised clustering of the different layers 1 layer after the other
-             .learningall -> makes the online unsupervised clustering of the different layers
              .running -> run the network and output either an averaged histogram for each class (train=True), either an histogram for each digit/video as input (train=False) either the stream of events as output of the last layer (LR=True)
              .run -> computes the run of an event as input of the network
              .get_fname -> returns the name of the network depending on its parameters
@@ -24,24 +22,26 @@ class network(object):
              """
 
     def __init__(self,  name = 'hots',
-                        timestr = None, # date of creation of the network
+                        timestr = None, # date of creation of the network 
+                                        # (can add dataset name to discriminate models)
                         nbclust = [4, 8, 16], # architecture of the network (default=Lagorce2017)
                         # parameters of time-surfaces and datasets
                         tau = [1e1, 1e2, 1e3], #time constant for exponential decay in millisec
                         R = [2, 4, 8], # parameter defining the spatial size of the time surface
+                        homeo = [.25, 1], # parameters for homeostasis (None is no homeo rule)
+                        camsize = [34,34], # size of the pixel grid that recorded the event stream
                         to_record = True
                 ):
         self.name = name
         self.date = timestr
         if self.name == 'hots':
             # replicates methods from Lagorce et al. 2017
-            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'first', False, None, 'se'
+            algo, decay, krnlinit, homeo, sigma = 'lagorce', 'exponential', 'first', None, None
         elif self.name == 'homhots':
             # replicates methods from Grimaldi et al. 2021
-            algo, decay, krnlinit, homeo, sigma, output = 'lagorce', 'exponential', 'rdn', True, None, 'se'
+            algo, decay, krnlinit, sigma = 'lagorce', 'exponential', 'rdn', None
             
         nbpolcam = 2 # number of polarities for the event stream as input of the network
-        camsize = [34,34] # size of the pixel grid that recorded the event stream
         tau = np.array(tau)*1e3 # to enter tau in ms
         nblay = len(nbclust)
         if to_record:
@@ -51,12 +51,12 @@ class network(object):
         for lay in range(nblay):
             if lay == 0:
                 self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbpolcam, sigma, decay)
-                self.L[lay] = layer(R[lay], nbclust[lay], nbpolcam, homeo, algo, krnlinit, output, to_record)
+                self.L[lay] = layer(R[lay], nbclust[lay], nbpolcam, homeo, algo, krnlinit, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
             else:
                 self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbclust[lay-1], sigma, decay)
-                self.L[lay] = layer(R[lay], nbclust[lay], nbclust[lay-1], homeo, algo, krnlinit, output, to_record)
+                self.L[lay] = layer(R[lay], nbclust[lay], nbclust[lay-1], homeo, algo, krnlinit, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
 
@@ -69,10 +69,26 @@ class network(object):
         t_index = indices.index('t')
         p_index = indices.index('p')
         
+        events_output = np.array([4])
+        target_output = []
+        indices_output = [0]
+        
+        if learn:
+            model, loaded = self.load_model()
+            if loaded:
+                self.L = model.L
+                self.TS = model.TS
+                if model.stats:
+                    self.stats = model.stats
+                return events_output, target_output, indices_output
+        
         pbar = tqdm(total=len(loader))
         
         for events, target in loader:
             events = events.squeeze()
+            target_output.append(target.item())
+            cum_indices = indices_output[-1]+events.shape[0]
+            indices_output.append(cum_indices) 
             pbar.update(1)
             for i in range(len(self.L)):
                 self.TS[i].spatpmat[:] = 0
@@ -85,12 +101,18 @@ class network(object):
                     timesurf = self.TS[lay].addevent(x, y, t, p)
                     if len(timesurf)>0:
                         p = self.L[lay].run(timesurf, learn)
-                        #if lay==len(self.TS):
-                            # append p 
+                        if lay==len(self.TS):
+                            events_output = np.vstack((events_output, np.array([x,y,t,p])))
                     else:
                         break
         pbar.close()
-            
+        if learn:
+            self.save_model()
+        return events_output, target_output, indices_output
+    
+    
+    
+    
 
     def learningall(self, nb_digit=10, train=True, dataset='nmnist', diginit=True, ds_ev=None, maxevts=None, kfold = None, kfold_ind = None, outstyle='histo', verbose=True):
 
@@ -155,19 +177,56 @@ class network(object):
         return out, activout
 
     def get_fname(self):
-        timestr = self.date
-        algo = self.L[0].algo
         arch = [self.L[i].kernel.shape[1] for i in range(len(self.L))]
         R = [self.L[i].R for i in range(len(self.L))]
         tau = [np.round(self.TS[i].tau*1e-3,2) for i in range(len(self.TS))]
-        homeo = self.L[0].homeo
-        homparam = self.L[0].homparam
-        krnlinit = self.L[0].krnlinit
-        sigma = self.TS[0].sigma
-        onebyone = self.onbon
-        f_name = f'{timestr}_{algo}_{krnlinit}_{sigma}_{homeo}_{homparam}_{arch}_{tau}_{R}_{onebyone}'
-        self.name = f_name
+        f_name = f'{self.date}_{self.name}_{self.L[0].homeo}_{arch}_{tau}_{R}'
         return f_name
+
+    def save_model(self):
+        path = '../Records/models/'
+        if not os.path.exists(path):
+            os.makedirs(path)
+        f_name = path+self.get_fname()+'.pkl'
+        with open(f_name, 'wb') as file:
+            pickle.dump(self, file, pickle.HIGHEST_PROTOCOL)
+
+    def load_model(self):
+        loaded = False
+        model = []
+        path = '../Records/models/'
+        f_name = path+self.get_fname()+'.pkl'
+        if os.path.isfile(f_name):
+            with open(f_name, 'rb') as file:
+                model = pickle.load(file)
+            print(f'loading a network with name:\n {f_name}')
+            loaded = True
+        return model, loaded
+
+    def save_output(self, evout, train, homeo, nb, jitonic):
+        if train:
+            path = f'../Records/train/'
+        else:
+            path = f'../Records/test/'
+        if not os.path.exists(path):
+            os.makedirs(path)
+        f_name = path+self.get_fname()+f'_{homeo}_{nb}_{jitonic}.pkl'
+        with open(f_name, 'wb') as file:
+            pickle.dump(evout, file, pickle.HIGHEST_PROTOCOL)
+
+    def load_output(self, train, homeo, nb, jitonic):
+        loaded = False
+        output = []
+        if train:
+            path = f'../Records/train/'
+        else:
+            path = f'../Records/test/'
+        f_name = path+self.get_fname()+f'_{homeo}_{nb}_{jitonic}.pkl'
+        if os.path.isfile(f_name):
+            with open(f_name, 'rb') as file:
+                output = pickle.load(file)
+            loaded = True
+        return output
     
     def sensformat(self,sensor_size):
         for i in range(1,len(self.TS)):
@@ -177,100 +236,6 @@ class network(object):
         self.TS[0].camsize = sensor_size
         self.TS[0].spatpmat = np.zeros((2,sensor_size[0]+1,sensor_size[1]+1))
         self.stats[0].actmap = np.zeros((2,sensor_size[0]+1,sensor_size[1]+1))
-
-    def save_model(self, dataset):
-        if dataset=='nmnist':
-            path = '../Records/EXP_03_NMNIST/models/'
-        elif dataset=='cars':
-            path = '../Records/EXP_04_NCARS/models/'
-        elif dataset=='poker':
-            path = '../Records/EXP_05_POKERDVS/models/'
-        elif dataset=='gesture':
-            path = '../Records/EXP_06_DVSGESTURE/models/'
-        else: print('define a path for this dataset')
-        if not os.path.exists(path):
-            os.makedirs(path)
-        f_name = path+self.get_fname()+'.pkl'
-        with open(f_name, 'wb') as file:
-            pickle.dump(self, file, pickle.HIGHEST_PROTOCOL)
-
-    def load_model(self, dataset, verbose):
-        model = []
-        if dataset=='nmnist':
-            path = '../Records/EXP_03_NMNIST/models/'
-        elif dataset=='cars':
-            path = '../Records/EXP_04_NCARS/models/'
-        elif dataset=='poker':
-            path = '../Records/EXP_05_POKERDVS/models/'
-        elif dataset=='gesture':
-            path = '../Records/EXP_06_DVSGESTURE/models/'
-        else: print('define a path for this dataset')
-        f_name = path+self.get_fname()+'.pkl'
-        if verbose:
-            print(f_name)
-        if not os.path.isfile(f_name):
-            return model
-        else:
-            with open(f_name, 'rb') as file:
-                model = pickle.load(file)
-        return model
-
-    def save_output(self, evout, homeo, dataset, nb, train, jitonic, outstyle, kfold_ind):
-        if dataset=='nmnist':
-            direc = 'EXP_03_NMNIST'
-        elif dataset=='cars':
-            direc = 'EXP_04_NCARS'
-        elif dataset=='poker':
-            direc = 'EXP_05_POKERDVS'
-        elif dataset=='gesture':
-            direc = 'EXP_06_DVSGESTURE'
-        elif dataset=='barrel':
-            direc = 'EXP_01_LagorceKmeans'
-        else: print('define a path for this dataset')
-        if train:
-            path = f'../Records/{direc}/train/'
-        else:
-            path = f'../Records/{direc}/test/'
-        if not os.path.exists(path):
-            os.makedirs(path)
-        f_name = path+self.get_fname()+f'_{nb}_{jitonic}_{outstyle}'
-        if kfold_ind is not None:
-            f_name+='_'+str(kfold_ind)
-        if homeo:
-            f_name = f_name+'_homeo'
-        f_name = f_name +'.pkl'
-        with open(f_name, 'wb') as file:
-            pickle.dump(evout, file, pickle.HIGHEST_PROTOCOL)
-
-    def load_output(self, dataset, homeo, nb, train, jitonic, outstyle, kfold_ind, verbose):
-        loaded = False
-        output = []
-        if dataset=='nmnist':
-            direc = 'EXP_03_NMNIST'
-        elif dataset=='cars':
-            direc = 'EXP_04_NCARS'
-        elif dataset=='poker':
-            direc = 'EXP_05_POKERDVS'
-        elif dataset=='gesture':
-            direc = 'EXP_06_DVSGESTURE'
-        else: print('define a path for this dataset')
-        if train:
-            path = f'../Records/{direc}/train/'
-        else:
-            path = f'../Records/{direc}/test/'
-        f_name = path+self.get_fname()+f'_{nb}_{jitonic}_{outstyle}'
-        if kfold_ind is not None:
-            f_name+='_'+str(kfold_ind)
-        if homeo:
-            f_name = f_name+'_homeo'
-        f_name = f_name +'.pkl'
-        if verbose:
-            print(f_name)
-        if os.path.isfile(f_name):
-            with open(f_name, 'rb') as file:
-                output = pickle.load(file)
-            loaded = True
-        return output, loaded
 
 
 ##___________________PLOTTING________________________________________________________________
