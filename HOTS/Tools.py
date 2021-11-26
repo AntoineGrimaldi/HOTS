@@ -1,3 +1,21 @@
+import os
+import pickle
+
+def save_output(network, evout, train, nb, jitonic):
+    
+    if train:
+        path = f'../Records/train/'
+    else:
+        path = f'../Records/test/'
+    if not os.path.exists(path):
+        os.makedirs(path)
+    f_name = path+network.get_fname()+f'_{network.L[0].homeo}_{nb}_{jitonic}.pkl'
+    with open(f_name, 'wb') as file:
+        pickle.dump(evout, file, pickle.HIGHEST_PROTOCOL)
+
+
+
+
 from HOTS.Network import network
 import torch
 from torch.utils.data import Dataset, TensorDataset, DataLoader, SubsetRandomSampler
