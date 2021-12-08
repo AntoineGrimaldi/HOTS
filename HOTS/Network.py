@@ -30,7 +30,7 @@ class network(object):
                         R = [2, 4, 8], # parameter defining the spatial size of the time surface
                         homeo = [.25, 1], # parameters for homeostasis (None is no homeo rule)
                         camsize = [34,34], # size of the pixel grid that recorded the event stream
-                        to_record = True
+                        to_record = False
                 ):
         self.name = name
         self.date = timestr
@@ -48,6 +48,9 @@ class network(object):
             self.stats = [[]]*nblay
         self.TS = [[]]*nblay
         self.L = [[]]*nblay
+        self.stats = False
+        if to_record:
+            self.stats = [[]]*nblay
         for lay in range(nblay):
             if lay == 0:
                 self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbpolcam, sigma, decay)
@@ -81,7 +84,7 @@ class network(object):
                 if model.stats:
                     self.stats = model.stats
                 return events_output, target_output, indices_output
-        
+            
         pbar = tqdm(total=len(loader))
         
         for events, target in loader:
@@ -94,13 +97,18 @@ class network(object):
                 self.TS[i].spatpmat[:] = 0
                 self.TS[i].iev = 0
                 self.L[i].cumhisto[:] = 1
-                #self.stats[i].actmap[:] = 0
+                if self.stats:
+                    self.stats[i].actmap[:] = 0
             for iev in range(len(events)):
                 x, y, t, p = int(events[iev][x_index].item()), int(events[iev][y_index].item()), int(events[iev][t_index].item()), int(events[iev][p_index].item())
                 for lay in range(len(self.L)):
+                    dic_prev = self.L[lay].kernel.copy()
                     timesurf = self.TS[lay].addevent(x, y, t, p)
                     if len(timesurf)>0:
                         p = self.L[lay].run(timesurf, learn)
+                        if self.stats:
+                            self.stats[lay].actmap[p,x,y] = 1
+                            self.stats[lay].update(p, self.L[lay].kernel, timesurf, self.TS[lay].tau, dic_prev)
                         if lay==len(self.TS):
                             events_output = np.vstack((events_output, np.array([x,y,t,p])))
                     else:
@@ -109,72 +117,6 @@ class network(object):
         if learn:
             self.save_model()
         return events_output, target_output, indices_output
-    
-    
-    
-    
-
-    def learningall(self, nb_digit=10, train=True, dataset='nmnist', diginit=True, ds_ev=None, maxevts=None, kfold = None, kfold_ind = None, outstyle='histo', verbose=True):
-
-        model = self.load_model(dataset, verbose)
-        if model:
-            return model
-        else:
-            loader, ordering, classes = self.load(dataset)
-            nbclass = len(classes)
-            pbar = tqdm(total=nb_digit*nbclass)
-            nbloadz = np.zeros([nbclass])
-            while np.sum(nbloadz)<nb_digit*nbclass:
-                if diginit:
-                    for i in range(len(self.L)):
-                        self.TS[i].spatpmat[:], self.TS[i].iev = 0, 0
-                events, target = next(iter(loader))
-                if nbloadz[target]<nb_digit:
-                    nbloadz[target]+=1
-                    pbar.update(1)
-                    if ds_ev:
-                        events = events[:,::ds_ev,:]
-                    if maxevts:
-                        N_max = min(maxevts, events.shape[1])
-                    else:
-                        N_max = events.shape[1]
-                    if dataset=='cars':
-                        size_x = max(events[0,:,ordering.find("x")])-min(events[0,:,ordering.find("x")])+1
-                        size_y = max(events[0,:,ordering.find("y")])-min(events[0,:,ordering.find("y")])+1
-                        self.sensformat((int(size_x.item()),int(size_y.item())))
-                        events[0,:,ordering.find("x")] -= min(events[0,:,ordering.find("x")]).numpy()
-                        events[0,:,ordering.find("y")] -= min(events[0,:,ordering.find("y")]).numpy()
-                        
-                    for iev in range(N_max):
-                        self.run(events[0][iev][ordering.find("x")].item(), \
-                                 events[0][iev][ordering.find("y")].item(), \
-                                 events[0][iev][ordering.find("t")].item(), \
-                                 events[0][iev][ordering.find("p")].item(), \
-                                 learn=True)
-            pbar.close()
-            for l in range(len(self.L)):
-                self.stats[l].histo = self.L[l].cumhisto.copy()
-                
-            self.save_model(dataset)
-            return self
-
-    def run(self, x, y, t, p, learn=False):
-        lay = 0
-        activout=False
-        while lay<len(self.TS):
-            timesurf = self.TS[lay].addevent(x, y, t, p)
-            if activ:
-                p, dist = self.L[lay].run(timesurf, learn)
-                if to_record:
-                    self.stats[lay].update(p, self.L[lay].kernel, timesurf, dist)
-                    #self.stats[lay].actmap[int(np.argmax(p)),self.TS[lay].x,self.TS[lay].y]=1
-                lay+=1
-                if lay==len(self.TS):
-                    activout=True
-            else:
-                lay = len(self.TS)
-        out = [x,y,t,np.argmax(p)]
-        return out, activout
 
     def get_fname(self):
         arch = [self.L[i].kernel.shape[1] for i in range(len(self.L))]
@@ -203,31 +145,6 @@ class network(object):
             loaded = True
         return model, loaded
 
-    def save_output(self, evout, train, homeo, nb, jitonic):
-        if train:
-            path = f'../Records/train/'
-        else:
-            path = f'../Records/test/'
-        if not os.path.exists(path):
-            os.makedirs(path)
-        f_name = path+self.get_fname()+f'_{homeo}_{nb}_{jitonic}.pkl'
-        with open(f_name, 'wb') as file:
-            pickle.dump(evout, file, pickle.HIGHEST_PROTOCOL)
-
-    def load_output(self, train, homeo, nb, jitonic):
-        loaded = False
-        output = []
-        if train:
-            path = f'../Records/train/'
-        else:
-            path = f'../Records/test/'
-        f_name = path+self.get_fname()+f'_{homeo}_{nb}_{jitonic}.pkl'
-        if os.path.isfile(f_name):
-            with open(f_name, 'rb') as file:
-                output = pickle.load(file)
-            loaded = True
-        return output
-    
     def sensformat(self,sensor_size):
         for i in range(1,len(self.TS)):
             self.TS[i].camsize = sensor_size
@@ -330,60 +247,4 @@ class network(object):
                 axi.imshow(self.TS[i].spatpmat, cmap=plt.cm.plasma, interpolation='nearest')
                 axi.set_xticks(())
                 axi.set_yticks(())
-
-
-def load(dataset, trainset, jitonic, kfold, kfold_ind):
-
-    #_______ADDING JITTER_________
-    transform = None
-    if jitonic[1] is not None:
-        print(f'spatial jitter -> var = {jitonic[1]}')
-        transform = tonic.transforms.Compose([tonic.transforms.SpatialJitter(variance_x=jitonic[1], variance_y=jitonic[1], sigma_x_y=0, integer_coordinates=True, clip_outliers=True)])
-
-    if jitonic[0] is not None:
-        print(f'time jitter -> var = {jitonic[0]}')
-        transform = tonic.transforms.Compose([tonic.transforms.TimeJitter(variance=jitonic[0], integer_timestamps=False, clip_negative=True, sort_timestamps=True)])
-    #_____________________________
-         
-    #_______GETTING DATASET_______    
-    path = '../Data/'
-    if dataset == 'nmnist':
-        eventset = tonic.datasets.NMNIST(save_to='../Data/',
-                                train=trainset,
-                                transform=transform)
-    elif dataset == 'poker':
-        eventset = tonic.datasets.POKERDVS(save_to='../Data/',
-                                train=trainset,
-                                transform=transform)
-    elif dataset == 'gesture':
-        eventset = tonic.datasets.DVSGesture(save_to='../Data/',
-                                train=trainset,
-                                transform=transform)
-    elif dataset == 'cars':
-        eventset = tonic.datasets.NCARS(save_to='../Data/',
-                                train=trainset,
-                                transform=transform)
-    elif dataset == 'ncaltech':
-        eventset = tonic.datasets.NCALTECH101(save_to='../Data/',
-                                train=trainset,
-                                transform=transform)
-    else: print('problem with dataset')
-    #_____________________________
-        
-        
-    #_______BUILDING LOADER_______  
-    if kfold:
-        subset_indices = []
-        subset_size = len(eventset)//kfold
-        for i in range(len(eventset.classes)):
-            all_ind = np.where(np.array(eventset.targets)==i)[0]
-            subset_indices += all_ind[kfold_ind*subset_size//len(eventset.classes):
-                            min((kfold_ind+1)*subset_size//len(eventset.classes), len(eventset)-1)].tolist()
-        g_cpu = Generator()
-        subsampler = SubsetRandomSampler(subset_indices, g_cpu)
-        loader = DataLoader(eventset, batch_size=1, shuffle=False, sampler=subsampler)
-    else:
-        loader = DataLoader(eventset, shuffle=True)
-    #_____________________________
-    return loader, eventset.ordering, eventset.classes
     

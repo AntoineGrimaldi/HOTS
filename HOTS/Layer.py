@@ -50,6 +50,7 @@ class layer(object):
             Ck = self.kernel[:,closest_proto_idx]
             alpha = 0.01/(1+self.cumhisto[closest_proto_idx]/20000)
             Ck_t = Ck + alpha*simil[closest_proto_idx]*(TS - Ck)
+            #Ck_t = Ck + alpha*(TS - simil[closest_proto_idx]*Ck)
             self.kernel[:,closest_proto_idx] = Ck_t
 
         p = closest_proto_idx
