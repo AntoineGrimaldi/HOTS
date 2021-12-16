@@ -24,12 +24,12 @@ class network(object):
     def __init__(self,  name = 'hots',
                         timestr = None, # date of creation of the network 
                                         # (can add dataset name to discriminate models)
-                        nbclust = [4, 8, 16], # architecture of the network (default=Lagorce2017)
+                        nbclust = (4,8,16), # architecture of the network (default=Lagorce2017)
                         # parameters of time-surfaces and datasets
-                        tau = [1e1, 1e2, 1e3], #time constant for exponential decay in millisec
-                        R = [2, 4, 8], # parameter defining the spatial size of the time surface
-                        homeo = [.25, 1], # parameters for homeostasis (None is no homeo rule)
-                        camsize = [34,34], # size of the pixel grid that recorded the event stream
+                        tau = (1e1,1e2,1e3), #time constant for exponential decay in millisec
+                        R = (2,4,8), # parameter defining the spatial size of the time surface
+                        homeo = (.25,1), # parameters for homeostasis (None is no homeo rule)
+                        camsize = (34,34), # size of the pixel grid that recorded the event stream
                         to_record = False
                 ):
         self.name = name
@@ -65,16 +65,12 @@ class network(object):
 
 ##___________________________________________________________________________________________
 
-    def running(self, loader, indices, classes, learn=False, verbose = True):
+    def running(self, loader, ordering, classes, train=True, learn=False, jitter=None, verbose=True):
         
-        x_index = indices.index('x')
-        y_index = indices.index('y')
-        t_index = indices.index('t')
-        p_index = indices.index('p')
-        
-        events_output = np.array([4])
-        target_output = []
-        indices_output = [0]
+        x_index = ordering.index('x')
+        y_index = ordering.index('y')
+        t_index = ordering.index('t')
+        p_index = ordering.index('p')
         
         if learn:
             model, loaded = self.load_model()
@@ -83,15 +79,21 @@ class network(object):
                 self.TS = model.TS
                 if model.stats:
                     self.stats = model.stats
-                return events_output, target_output, indices_output
+                return
+        else:
+            if train:
+                output_path = f'../Records/output/train/{self.get_fname()}_{len(loader)}_{jitter}/'
+            else: output_path = f'../Records/output/test/{self.get_fname()}_{len(loader)}_{jitter}/'
+
+            if not os.path.isfile(output_path):
+                for classe in classes:
+                    os.makedirs(output_path+f'{classe}')
             
         pbar = tqdm(total=len(loader))
-        
+        nb = 0
         for events, target in loader:
+            events_output = np.array([4])
             events = events.squeeze()
-            target_output.append(target.item())
-            cum_indices = indices_output[-1]+events.shape[0]
-            indices_output.append(cum_indices) 
             pbar.update(1)
             for i in range(len(self.L)):
                 self.TS[i].spatpmat[:] = 0
@@ -113,10 +115,12 @@ class network(object):
                             events_output = np.vstack((events_output, np.array([x,y,t,p])))
                     else:
                         break
+            if not learn:
+                np.save(output_path+f'{classes[target]}/{nb}', events_output)
+                nb+=1
         pbar.close()
         if learn:
             self.save_model()
-        return events_output, target_output, indices_output
 
     def get_fname(self):
         arch = [self.L[i].kernel.shape[1] for i in range(len(self.L))]
