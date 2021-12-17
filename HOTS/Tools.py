@@ -1,29 +1,4 @@
-import os
-import pickle
 
-def save_output(network, evout, train, nb, jitonic):
-    if train:
-        path = f'../Records/train/'
-    else:
-        path = f'../Records/test/'
-    if not os.path.exists(path):
-        os.makedirs(path)
-    f_name = path+network.get_fname()+f'_{network.L[0].homeo}_{nb}_{jitonic}.pkl'
-    with open(f_name, 'wb') as file:
-        pickle.dump(evout, file, pickle.HIGHEST_PROTOCOL)
-        
-        
-def load_output(network, train, nb, jitonic):
-    if train:
-        path = f'../Records/train/'
-    else:
-        path = f'../Records/test/'
-    f_name = path+network.get_fname()+f'_{network.L[0].homeo}_{nb}_{jitonic}.pkl'
-    if os.path.exists(f_name): print('output loaded')
-    with open(f_name, 'rb') as file:
-        output = pickle.load(file)
-        events, target, indices = output[0], output[1], output[2]
-    return events, target, indices
 
 
 from HOTS.Network import network

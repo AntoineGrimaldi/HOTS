@@ -1,20 +1,16 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from Layer import layer
-from TimeSurface import timesurface
-from Stats import stats
+from layer import layer
+from timesurface import timesurface
+from stats import stats
 from tqdm import tqdm
-import tonic
 import os
 import pickle
-from torch import Generator
-from torch.utils.data import SubsetRandomSampler, DataLoader
 
 class network(object):
-    """network is an Hierarchical network described in Lagorce et al. 2017 (HOTS). It loads event stream with the tonic package.
-    METHODS: .load -> loads datasets thanks to tonic package built on Pytorch.
-             .running -> run the network and output either an averaged histogram for each class (train=True), either an histogram for each digit/video as input (train=False) either the stream of events as output of the last layer (LR=True)
-             .run -> computes the run of an event as input of the network
+    """network is an Hierarchical network described in Lagorce et al. 2017 (HOTS).
+    METHODS:
+             .running -> runs the network from a loader and saves stream of events as output (learn=False), or a network with trained weights (learn=True)
              .get_fname -> returns the name of the network depending on its parameters
              .plotlayer -> plots the histogram of activation of the different layers ad associated kernels
              .plotconv -> plots the convergence of the layers during learning phase
@@ -85,14 +81,17 @@ class network(object):
                 output_path = f'../Records/output/train/{self.get_fname()}_{len(loader)}_{jitter}/'
             else: output_path = f'../Records/output/test/{self.get_fname()}_{len(loader)}_{jitter}/'
 
-            if not os.path.isfile(output_path):
+            if os.path.exists(output_path):
+                print(f'this dataset have already been processed, check at: \n {output_path}')
+                return
+            else:
                 for classe in classes:
                     os.makedirs(output_path+f'{classe}')
             
         pbar = tqdm(total=len(loader))
         nb = 0
         for events, target in loader:
-            events_output = np.array([4])
+            events_output = np.zeros([4])
             events = events.squeeze()
             pbar.update(1)
             for i in range(len(self.L)):
@@ -111,7 +110,7 @@ class network(object):
                         if self.stats:
                             self.stats[lay].actmap[p,x,y] = 1
                             self.stats[lay].update(p, self.L[lay].kernel, timesurf, self.TS[lay].tau, dic_prev)
-                        if lay==len(self.TS):
+                        if lay==len(self.TS)-1:
                             events_output = np.vstack((events_output, np.array([x,y,t,p])))
                     else:
                         break
@@ -143,9 +142,9 @@ class network(object):
         path = '../Records/models/'
         f_name = path+self.get_fname()+'.pkl'
         if os.path.isfile(f_name):
+            print(f'loading a network with name:\n {f_name}')
             with open(f_name, 'rb') as file:
                 model = pickle.load(file)
-            print(f'loading a network with name:\n {f_name}')
             loaded = True
         return model, loaded
 

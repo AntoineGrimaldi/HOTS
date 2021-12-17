@@ -1,5 +1,5 @@
 import numpy as np
-from TimeSurface import timesurface
+from timesurface import timesurface
 import matplotlib.pyplot as plt
 
 class layer(object):
@@ -30,7 +30,8 @@ class layer(object):
 ##____________DIFFERENT METHODS________________________________________________________
     
     def run(self, TS, learn):
-        
+        '''runs the layer of the network
+        '''
         if self.krnlinit=='first':
             while self.nbtrain<self.kernel.shape[1]:
                 self.kernel[:,self.nbtrain]=TS.T

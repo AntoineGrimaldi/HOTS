@@ -28,10 +28,9 @@ class timesurface(object):
 
     def __init__(self, R, tau, camsize, nbpol, sigma, decay):
         # PARAMETERS OF THE TIME SURFACE
-        self.R = R 
+        self.R = R
         self.tau = tau # in micro secondes
         self.camsize = camsize 
-        self.dtemp = 2 # minimum time difference to trigger a new event on the same pixel
         self.kthrs = 5
         self.beta = 1
         self.filt = 2
@@ -46,42 +45,33 @@ class timesurface(object):
         self.spatpmat = np.zeros([nbpol,camsize[0]+1,camsize[1]+1])
 
     def addevent(self, xev, yev, tev, pev): # get integers as input
-        timesurf = np.zeros((self.spatpmat.shape[0],2*self.R+1,2*self.R+1))
-        if self.iev==0:
-            self.iev += 1
-            self.x, self.y, self.t, self.p = xev, yev, tev, pev
-            self.spatpmat[self.p, self.x, self.y] = 1
-            timesurf[self.p, self.R, self.R] = 1
-        elif xev==self.x and yev==self.y and pev==self.p and tev-self.t<self.dtemp: # artefacts of a ATIS camera
-            #print(f'small time difference between 2 events on the same pixel: {tev-self.t} ms')
-            pass
-        else:
-            self.iev += 1
-            self.x, self.y, self.p = xev, yev, pev
-            # updating the spatiotemporal surface
-            if self.decay == 'exponential':
-                self.spatpmat = self.spatpmat*np.exp(-(tev-self.t)/self.tau)
-                # making threshold for small elements
-                self.spatpmat[self.spatpmat<np.exp(-self.kthrs)]=0
-            elif self.decay == 'linear':
-                self.spatpmat = max(self.spatpmat-(tev-self.t)/self.tau,0)
-            self.t = tev
-            self.spatpmat[self.p, self.x, self.y] = 1
+        TS = []
+        self.iev += 1
+        self.x, self.y, self.p = xev, yev, pev
+        # updating the spatiotemporal surface
+        if self.decay == 'exponential':
+            self.spatpmat = self.spatpmat*np.exp(-(tev-self.t)/self.tau)
+            # making threshold for small elements
+            self.spatpmat[self.spatpmat<np.exp(-self.kthrs)]=0
+        elif self.decay == 'linear':
+            self.spatpmat = max(self.spatpmat-(tev-self.t)/self.tau,0)
+        self.t = tev
+        self.spatpmat[self.p, self.x, self.y] = 1
+        if self.R:
             timesurf = self.getts()
+        else:
+            timesurf = self.spatpmat.copy()
 
-            if self.sigma is not None:
-                X_p, Y_p = np.meshgrid(np.arange(-self.R, self.R+1),
-                                         np.arange(-self.R, self.R+1))
-                radius = np.sqrt(X_p**2 + Y_p**2)
-                mask_circular = np.exp(- .5 * radius**2 / self.R ** 2 / self.sigma**2)
-                timesurf *= mask_circular
+        if self.sigma is not None:
+            X_p, Y_p = np.meshgrid(np.arange(-timesurf.shape[1]//2, timesurf.shape[2]//2+1),
+                                     np.arange(-timesurf.shape[1]//2, timesurf.shape[2]//2+1))
+            radius = np.sqrt(X_p**2 + Y_p**2)
+            mask_circular = np.exp(- .5 * radius**2 / timesurf.shape[1]//2 * timesurf.shape[2]//2 / self.sigma**2)
+            timesurf *= mask_circular
 
         card = np.nonzero(timesurf[self.p])
-        if len(card[0])>self.filt*self.R:
-            TS = np.reshape(timesurf, [len(timesurf)*(2*self.R+1)**2])
-        else:
-            TS = []
-        
+        if len(card[0])>self.filt*(timesurf.shape[1]+timesurf.shape[2])/2:
+            TS = np.reshape(timesurf, [timesurf.shape[0]*timesurf.shape[1]*timesurf.shape[2]])
         return TS
 
     def getts(self):
@@ -104,16 +94,20 @@ class timesurface(object):
 
     def plote(self, gamma=2.2):
 
-        timesurf = self.getts()
+        if self.R:
+            timesurf = self.getts()
+        else:
+            timesurf = self.spatpmat.copy()
 
         fig = plt.figure(figsize=(10,5))
         sub1 = fig.add_subplot(1,3,1)
         mapa = sub1.imshow((self.spatpmat[self.p].T)**gamma, cmap=plt.cm.plasma)
         sub1.plot(self.x,self.y,'r*')
-        sub1.plot([self.x-self.R, self.x-self.R], [self.y-self.R, self.y+self.R], color='red')
-        sub1.plot([self.x-self.R, self.x+self.R], [self.y-self.R, self.y-self.R], color='red')
-        sub1.plot([self.x-self.R, self.x+self.R], [self.y+self.R, self.y+self.R], color='red')
-        sub1.plot([self.x+self.R, self.x+self.R], [self.y-self.R, self.y+self.R], color='red')
+        if self.R:
+            sub1.plot([self.x-self.R, self.x-self.R], [self.y-self.R, self.y+self.R], color='red')
+            sub1.plot([self.x-self.R, self.x+self.R], [self.y-self.R, self.y-self.R], color='red')
+            sub1.plot([self.x-self.R, self.x+self.R], [self.y+self.R, self.y+self.R], color='red')
+            sub1.plot([self.x+self.R, self.x+self.R], [self.y-self.R, self.y+self.R], color='red')
         sub1.set_title('OFF events with exponential decay')
         cbar_ax = fig.add_axes([0.95, 0.15, 0.05, 0.7])
         fig.colorbar(mapa, cax=cbar_ax);
@@ -127,21 +121,23 @@ class timesurface(object):
 
 
     def plot3D(self, gamma=2.2):
+        if self.R:
+            timesurf = self.getts()
 
-        timesurf = self.getts()
+            fig = plt.figure(figsize=(10,5))
+            sub1 = fig.add_subplot(1,2,1, projection="3d")
+            x = np.linspace(int(self.x-self.R),int(self.x+self.R),2*self.R+1)
+            y = np.linspace(int(self.y-self.R),int(self.y+self.R),2*self.R+1)
+            X,Y = np.meshgrid(x,y)
+            sub1.plot_surface(X,Y,timesurf[0,:,:].T, cmap= plt.cm.plasma, alpha=0.5)
+            sub1.set_title('OFF 3D time-surface')
+            sub2 = fig.add_subplot(1,2,2, projection="3d")
+            x = np.linspace(int(self.x-self.R),int(self.x+self.R),2*self.R+1)
+            y = np.linspace(int(self.y-self.R),int(self.y+self.R),2*self.R+1)
+            X,Y = np.meshgrid(x,y)
+            sub2.plot_surface(X,Y,timesurf[1,:,:].T, cmap= plt.cm.plasma, alpha=0.5)
+            sub2.set_title('ON 3D time-surface')
 
-        fig = plt.figure(figsize=(10,5))
-        sub1 = fig.add_subplot(1,2,1, projection="3d")
-        x = np.linspace(int(self.x-self.R),int(self.x+self.R),2*self.R+1)
-        y = np.linspace(int(self.y-self.R),int(self.y+self.R),2*self.R+1)
-        X,Y = np.meshgrid(x,y)
-        sub1.plot_surface(X,Y,timesurf[0,:,:].T, cmap= plt.cm.plasma, alpha=0.5)
-        sub1.set_title('OFF 3D time-surface')
-        sub2 = fig.add_subplot(1,2,2, projection="3d")
-        x = np.linspace(int(self.x-self.R),int(self.x+self.R),2*self.R+1)
-        y = np.linspace(int(self.y-self.R),int(self.y+self.R),2*self.R+1)
-        X,Y = np.meshgrid(x,y)
-        sub2.plot_surface(X,Y,timesurf[1,:,:].T, cmap= plt.cm.plasma, alpha=0.5)
-        sub2.set_title('ON 3D time-surface')
-
-        plt.show()
+            plt.show()
+        else:
+            print('have to implement it for time surface with sensor size')
