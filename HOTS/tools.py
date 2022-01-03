@@ -1,10 +1,7 @@
-from torch.utils.data import SubsetRandomSampler, DataLoader
-from torch import Generator
-from tonic.dataset import Dataset
 from network import network
+from tonic.dataset import Dataset
 import numpy as np
-import os
-
+import os, torch
 
 
 def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, seed=42):
@@ -17,15 +14,13 @@ def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, seed=42):
             all_ind = np.where(np.array(dataset.targets)==i)[0]
             subset_indices += all_ind[kfold_ind*subset_size//len(dataset.classes):
                             min((kfold_ind+1)*subset_size//len(dataset.classes), len(dataset)-1)].tolist()
-        g_cpu = Generator()
+        g_cpu = torch.Generator()
         g_cpu.manual_seed(seed)
-        subsampler = SubsetRandomSampler(subset_indices, g_cpu)
-        loader = DataLoader(dataset, batch_size=1, shuffle=False, sampler=subsampler, num_workers = num_workers)
+        subsampler = torch.utils.data.SubsetRandomSampler(subset_indices, g_cpu)
+        loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, sampler=subsampler, num_workers = num_workers)
     else:
-        loader = DataLoader(dataset, shuffle=True, num_workers = num_workers)
+        loader = torch.utils.data.DataLoader(dataset, shuffle=True, num_workers = num_workers)
     return loader, dataset.ordering, dataset.classes
-
-
 
 class HOTS_Dataset(Dataset):
     """Make a dataset from the output of the HOTS network
