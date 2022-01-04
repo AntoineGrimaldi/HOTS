@@ -43,3 +43,6 @@ pip install -e .
 - try with alpha instead of exponential decay
 - what happens with sigma
 - try to make a stride within the network
+- plot loss
+
+
