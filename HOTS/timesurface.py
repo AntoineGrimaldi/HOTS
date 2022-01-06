@@ -15,7 +15,6 @@ class timesurface(object):
             dtemp -> minimum time required between 2 events on the same pixel to avoid camera issues
                                         (some pixels (x>255) spike 2 times)
             kthrs -> constante*tau defining a null threshold for past events
-            beta -> is a constant to apply a temporal decay if p[pol]<1
 
     METHODS:
             .addevent -> add an event to the time surface when event.x, event.y, event.t and p is given as input
@@ -32,7 +31,6 @@ class timesurface(object):
         self.tau = tau # in micro secondes
         self.camsize = camsize 
         self.kthrs = 5
-        self.beta = 1
         self.filt = 2
         self.sigma = sigma
         self.decay = decay
@@ -63,11 +61,7 @@ class timesurface(object):
             timesurf = self.spatpmat.copy()
 
         if self.sigma is not None:
-            X_p, Y_p = np.meshgrid(np.arange(-timesurf.shape[1]//2, timesurf.shape[2]//2+1),
-                                     np.arange(-timesurf.shape[1]//2, timesurf.shape[2]//2+1))
-            radius = np.sqrt(X_p**2 + Y_p**2)
-            mask_circular = np.exp(- .5 * radius**2 / timesurf.shape[1]//2 * timesurf.shape[2]//2 / self.sigma**2)
-            timesurf *= mask_circular
+            timesurf = self.apply_mask(timesurf)
 
         card = np.nonzero(timesurf[self.p])
         if len(card[0])>self.filt*(timesurf.shape[1]+timesurf.shape[2])/2:
@@ -91,13 +85,24 @@ class timesurface(object):
             temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(0,0),(0,self.R)),'symmetric')
         timesurf = temp_spatpmat[:,int(xshift-self.R):int(xshift+self.R)+1,int(yshift-self.R):int(yshift+self.R)+1]
         return timesurf
+    
+    def apply_mask(self, timesurf):
+        X_p, Y_p = np.meshgrid(np.arange(-timesurf.shape[1]//2, timesurf.shape[1]//2),
+                                     np.arange(-timesurf.shape[2]//2, timesurf.shape[2]//2))
+        radius = np.sqrt(X_p**2 + Y_p**2)
+        mask_circular = np.exp(- .5 * radius**2 / self.sigma**2)/(2*np.pi*self.sigma)
+        timesurf *= mask_circular
+        return timesurf
 
-    def plote(self, gamma=2.2):
+    def plote(self, gamma=1):
 
         if self.R:
             timesurf = self.getts()
         else:
             timesurf = self.spatpmat.copy()
+            
+        if self.sigma is not None:
+            timesurf = self.apply_mask(timesurf)
 
         fig = plt.figure(figsize=(10,5))
         sub1 = fig.add_subplot(1,3,1)
@@ -119,10 +124,12 @@ class timesurface(object):
         sub3.set_title('ON time-surface')
         plt.show()
 
-
-    def plot3D(self, gamma=2.2):
+    def plot3D(self, gamma=1):
         if self.R:
             timesurf = self.getts()
+            
+            if self.sigma is not None:
+                timesurf = self.apply_mask(timesurf)
 
             fig = plt.figure(figsize=(10,5))
             sub1 = fig.add_subplot(1,2,1, projection="3d")

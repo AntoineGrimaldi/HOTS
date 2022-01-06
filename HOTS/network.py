@@ -78,8 +78,8 @@ class network(object):
                 return
         else:
             if train:
-                output_path = f'../Records/output/train/{self.get_fname()}_{len(loader)}_{jitter}/'
-            else: output_path = f'../Records/output/test/{self.get_fname()}_{len(loader)}_{jitter}/'
+                output_path = f'../Records/output/train/{self.get_fname()}_{jitter}/'
+            else: output_path = f'../Records/output/test/{self.get_fname()}_{jitter}/'
 
             if os.path.exists(output_path):
                 print(f'this dataset have already been processed, check at: \n {output_path}')
@@ -114,7 +114,7 @@ class network(object):
                             events_output = np.vstack((events_output, np.array([x,y,t,p])))
                     else:
                         break
-            if not learn:
+            if not learn and len(events_output.shape)>1:
                 np.save(output_path+f'{classes[target]}/{nb}', events_output)
                 nb+=1
         pbar.close()
