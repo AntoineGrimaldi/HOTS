@@ -388,3 +388,43 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
 
 ## OTHER 
 # classif avec histogram
+
+def fit_histo(network, 
+              num_workers=0,
+              verbose=True):
+    
+    path_to_dataset = f'../Records/output/train/{network.get_fname()}_None/'
+    if not os.path.exists(path_to_dataset):
+        print('process samples with the HOTS network first')
+        return
+    
+    timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
+    dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))
+    loader = get_loader(dataset, num_workers = num_workers)
+    if verbose: print(f'Number of training samples: {len(loader)}')
+    model_name = f'../Records/models/{network.get_fname()}_{len(loader)}_histo.pkl'
+    
+    if os.path.isfile(model_name):
+        print('load existing histograms')
+        with open(model_name, 'rb') as file:
+            histo, labelz = pickle.load(file)
+    else:
+        p_index = dataset.ordering.index('p')
+        #n_classes = len(dataset.classes)
+        n_polarity = timesurface_size[2]
+        histo = np.zeros([len(loader),n_polarity])
+        labelz = []
+        pbar = tqdm(total=len(loader))
+        sample_number = 0
+        for events, label in loader:
+            events, label = events.squeeze(0), label.squeeze(0) # just one digit = one batch
+            labelz.append(label)
+            value, frequency = np.unique(events[:,p_index], return_counts=True)
+            histo[sample_number,[value]] = frequency
+            sample_number+=1
+        pbar.update(1)
+        pbar.close()
+        with open(model_name, 'wb') as file:
+            pickle.dump([histo, labelz], file, pickle.HIGHEST_PROTOCOL)
+
+    return histo, labelz

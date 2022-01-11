@@ -91,6 +91,7 @@ class network(object):
         pbar = tqdm(total=len(loader))
         nb = 0
         for events, target in loader:
+            no_output = 0
             events_output = np.zeros([4])
             events = events.squeeze()
             pbar.update(1)
@@ -113,6 +114,8 @@ class network(object):
                         if lay==len(self.TS)-1:
                             events_output = np.vstack((events_output, np.array([x,y,t,p])))
                     else:
+                        #no_output += 1
+                        #print(f'{no_output} events did not reach the output layer, total number of events: {len(events)}', end='\r')
                         break
             if not learn and len(events_output.shape)>1:
                 np.save(output_path+f'{classes[target]}/{nb}', events_output)

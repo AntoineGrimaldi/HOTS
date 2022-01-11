@@ -31,7 +31,7 @@ class timesurface(object):
         self.tau = tau # in micro secondes
         self.camsize = camsize 
         self.kthrs = 5
-        self.filt = 2
+        self.filt = .3
         self.sigma = sigma
         self.decay = decay
         # VARIABLES OF THE TIME SURFACE
@@ -64,7 +64,7 @@ class timesurface(object):
             timesurf = self.apply_mask(timesurf)
 
         card = np.nonzero(timesurf[self.p])
-        if len(card[0])>self.filt*(timesurf.shape[1]+timesurf.shape[2])/2:
+        if len(card[0])>self.filt*timesurf.shape[1]*timesurf.shape[2]/timesurf.shape[0]:
             TS = np.reshape(timesurf, [timesurf.shape[0]*timesurf.shape[1]*timesurf.shape[2]])
         return TS
 
