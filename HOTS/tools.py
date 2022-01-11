@@ -4,6 +4,8 @@ import os, torch, tonic, pickle
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+## DATASET
+
 def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, shuffle=True, seed=42):
     # creates a loader for the samples of the dataset. If kfold is not None, 
     # then the dataset is splitted into different folds with equal repartition of the classes.
@@ -21,6 +23,73 @@ def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, shuffle=Tr
     else:
         loader = torch.utils.data.DataLoader(dataset, shuffle=shuffle, num_workers = num_workers)
     return loader
+
+def get_isi(events, ordering = 'xytp', verbose = False):
+    t_index, p_index = ordering.index('t'), ordering.index('p')
+    mean_isi = None
+    isipol = np.zeros([2])
+    for polarity in [0,1]:
+        events_pol = events[(events[:, p_index]==polarity)]
+        N_events = events_pol.shape[0]-1
+        for i in range(events_pol.shape[0]-1):
+            isi = events_pol[i+1,t_index]-events_pol[i,t_index]
+            if isi>0:
+                mean_isi = (N_events-1)/N_events*mean_isi+1/N_events*isi if mean_isi else isi
+        isipol[polarity]=mean_isi
+    if verbose:
+        print(f'Mean ISI for ON events: {np.round(isipol[1].mean()*1e-3,1)} in ms \n')
+        print(f'Mean ISI for OFF events: {np.round(isipol[0].mean()*1e-3,1)} in ms \n')
+    return isipol
+
+def get_dataset_info(trainset, testset):
+    t_index = trainset.ordering.index("t")
+    
+    print(f'number of samples in the trainset: {len(trainset)}')
+    print(f'number of samples in the testset: {len(testset)}')
+    print(40*'-')
+    
+    nbev = []
+    recordingtime = []
+    mean_isi = []
+    
+    loader = get_loader(trainset)
+    for events, target in loader:
+        events = events.squeeze().numpy()
+        mean_isi.append(get_isi(events,trainset.ordering).mean())
+        nbev.append(len(events))
+        recordingtime.append(events[:,t_index][-1])
+    loader = get_loader(testset)
+    for events, target in loader:
+        events = events.squeeze().numpy()
+        mean_isi.append(get_isi(events,trainset.ordering).mean())
+        nbev.append(len(events))
+        recordingtime.append(events[:,t_index][-1])
+        
+    fig, axs = plt.subplots(1,3, figsize=(15,5))
+    for i in range(3):
+        if i == 0:
+            x = recordingtime
+            ttl = 'recording time (in $\mu s$)'
+        elif i == 1:
+            x = nbev
+            ttl = 'number of events '
+        else:
+            x = mean_isi
+            ttl = 'mean ISI (in $\mu s$)'
+
+        n, bins, patches = axs[i].hist(x=x, bins='auto', color='#0504aa',
+                                    alpha=0.7, rwidth=0.85)
+        axs[i].grid(axis='y', alpha=0.75)
+        axs[i].set_xlabel('Value')
+        axs[i].set_ylabel('Frequency')
+        axs[i].set_title(f'Histogram for the {ttl}')
+        maxfreq = n.max()
+        axs[i].set_ylim(ymax=np.ceil(maxfreq / 10) * 10 if maxfreq % 10 else maxfreq + 10)
+    print(f'mean value for the recording time: {np.round(np.mean(recordingtime),0)/1e3} ms')
+    print(f'mean value for the number of events: {int(np.round(np.mean(nbev),0))}')
+    print(f'mean value for the interspike interval: {int(np.round(np.nanmean(mean_isi),0))} us')
+    print(40*'-')
+    
 
 class HOTS_Dataset(tonic.dataset.Dataset):
     """Make a dataset from the output of the HOTS network
@@ -73,6 +142,8 @@ class HOTS_Dataset(tonic.dataset.Dataset):
             20, ".npy"
         )
     
+## MLR
+    
 def fit_MLR(network, 
             tau_cla, #enter tau_cla in ms
             kfold = None,
@@ -85,6 +156,7 @@ def fit_MLR(network,
             seed = 42,
             verbose=True):
     
+    tau_cla*=1e3
     path_to_dataset = f'../Records/output/train/{network.get_fname()}_None/'
     if not os.path.exists(path_to_dataset):
         print('process samples with the HOTS network first')
@@ -95,7 +167,7 @@ def fit_MLR(network,
     dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
     loader = get_loader(dataset, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, seed=seed)
     if verbose: print(f'Number of training samples: {len(loader)}')
-    model_name = f'../Records/models/{network.get_fname()}_{len(loader)}_LR.pkl'
+    model_name = f'../Records/models/{network.get_fname()}_{int(tau_cla*1-3)}_{len(loader)}_LR.pkl'
     
     if os.path.isfile(model_name):
         print('load existing model')
@@ -116,7 +188,8 @@ def fit_MLR(network,
         optimizer = torch.optim.Adam(
             logistic_model.parameters(), lr=learning_rate, betas=betas, amsgrad=amsgrad
         )
-        pbar = tqdm(total=int(num_epochs))
+        if not verbose:
+            pbar = tqdm(total=int(num_epochs))
         for epoch in range(int(num_epochs)):
             losses = []
             for X, label in loader:
@@ -137,9 +210,10 @@ def fit_MLR(network,
                 losses.append(loss.item())
             if verbose:
                 print(f'loss for epoch number {epoch}: {loss}')
-            pbar.update(1)
-
-        pbar.close()
+            else:
+                pbar.update(1)
+        if not verbose:
+            pbar.close()
         with open(model_name, 'wb') as file:
             pickle.dump([logistic_model, losses], file, pickle.HIGHEST_PROTOCOL)
 
@@ -157,6 +231,7 @@ def predict_MLR(network,
                 verbose=True,
         ):
     
+    tau_cla*=1e3
     path_to_dataset = f'../Records/output/test/{network.get_fname()}_{jitter}/'
     if not os.path.exists(path_to_dataset):
         print('process samples with the HOTS network first')
@@ -309,3 +384,7 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
         plt.title('LR classification results evolution as a function of time');
     
     return meanac, onlinac, lastac, truepos, falsepos
+
+
+## OTHER 
+# classif avec histogram
