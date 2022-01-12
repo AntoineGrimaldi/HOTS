@@ -1,5 +1,5 @@
 import numpy as np
-from timesurface import timesurface
+from HOTS.timesurface import timesurface
 import matplotlib.pyplot as plt
 
 class layer(object):

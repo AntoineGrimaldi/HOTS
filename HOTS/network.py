@@ -1,8 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from layer import layer
-from timesurface import timesurface
-from stats import stats
+from HOTS.layer import layer
+from HOTS.timesurface import timesurface
+from HOTS.stats import stats
 from tqdm import tqdm
 import os
 import pickle
