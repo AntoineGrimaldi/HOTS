@@ -167,7 +167,7 @@ def fit_MLR(network,
     dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
     loader = get_loader(dataset, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, seed=seed)
     if verbose: print(f'Number of training samples: {len(loader)}')
-    model_name = f'../Records/models/{network.get_fname()}_{int(tau_cla*1-3)}_{len(loader)}_LR.pkl'
+    model_name = f'../Records/models/{network.get_fname()}_{int(tau_cla)}_{len(loader)}_LR.pkl'
     
     if os.path.isfile(model_name):
         print('load existing model')
@@ -378,8 +378,8 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
         
     if verbose:
         print(f'Mean accuracy: {np.round(meanac,3)*100}%')
-        plt.plot(time_axis,onlinac);
-        plt.xlabel('number of events');
+        plt.plot(time_axis*1e-3,onlinac);
+        plt.xlabel('time (in ms)');
         plt.ylabel('online accuracy');
         plt.title('LR classification results evolution as a function of time');
     
