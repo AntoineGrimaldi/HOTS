@@ -27,6 +27,7 @@ def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, shuffle=Tr
 def get_isi(events, ordering = 'xytp', verbose = False):
     t_index, p_index = ordering.index('t'), ordering.index('p')
     mean_isi = None
+    median_isi = None
     isipol = np.zeros([2])
     for polarity in [0,1]:
         events_pol = events[(events[:, p_index]==polarity)]
