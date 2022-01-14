@@ -40,6 +40,8 @@ class network(object):
         nbpolcam = 2 # number of polarities for the event stream as input of the network
         tau = np.array(tau)*1e3 # to enter tau in ms
         nblay = len(nbclust)
+        if R is None:
+            R = ((R,)*3)
         if to_record:
             self.stats = [[]]*nblay
         self.TS = [[]]*nblay
@@ -50,12 +52,12 @@ class network(object):
         for lay in range(nblay):
             if lay == 0:
                 self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbpolcam, sigma, decay)
-                self.L[lay] = layer(R[lay], nbclust[lay], nbpolcam, homeo, algo, krnlinit, to_record)
+                self.L[lay] = layer(R[lay], nbclust[lay], nbpolcam, homeo, algo, krnlinit, camsize, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
             else:
                 self.TS[lay] = timesurface(R[lay], tau[lay], camsize, nbclust[lay-1], sigma, decay)
-                self.L[lay] = layer(R[lay], nbclust[lay], nbclust[lay-1], homeo, algo, krnlinit, to_record)
+                self.L[lay] = layer(R[lay], nbclust[lay], nbclust[lay-1], homeo, algo, krnlinit, camsize, to_record)
                 if to_record:
                     self.stats[lay] = stats(nbclust[lay], camsize)
 
@@ -97,7 +99,7 @@ class network(object):
             pbar.update(1)
             for i in range(len(self.L)):
                 self.TS[i].spatpmat[:] = 0
-                self.TS[i].iev = 0
+                self.TS[i].iev, self.TS[i].x, self.TS[i].y, self.TS[i].t, self.TS[i].p = 0,0,0,0,0
                 self.L[i].cumhisto[:] = 1
                 if self.stats:
                     self.stats[i].actmap[:] = 0
@@ -106,6 +108,9 @@ class network(object):
                 for lay in range(len(self.L)):
                     dic_prev = self.L[lay].kernel.copy()
                     timesurf = self.TS[lay].addevent(x, y, t, p)
+                    if np.isnan(timesurf).sum()>0:
+                        #self.plote()
+                        print(iev)
                     if len(timesurf)>0:
                         p = self.L[lay].run(timesurf, learn)
                         if self.stats:

@@ -5,16 +5,19 @@ import matplotlib.pyplot as plt
 class layer(object):
     """layer makes the computations within a layer of the HOTS network based on the methods from Lagorce et al. 2017, Maro et al. 2020 or the Matching Pursuit algorithm.
     """
-    
-    def __init__(self, R, N_clust, nbpola, homeo, algo, krnlinit, to_record):
-        self.to_record = to_record 
-        self.R = R               
+    def __init__(self, R, N_clust, nbpola, homeo, algo, krnlinit, camsize, to_record):
+        self.to_record = to_record
+        self.R = R
         self.homeo = homeo       # gives the parameters of the homeostasis rule (None if no homeostasis)
         self.algo = algo
         self.nbtrain = 0         # number of TS sent in the layer
         self.krnlinit = krnlinit # initialization of the kernels, can be 'rdn' (random) or 'first' (based on the first inputs)
-        self.kernel = np.random.rand(nbpola*(2*R+1)**2, N_clust)
-        self.kernel /= np.linalg.norm(self.kernel)
+        if R:
+            self.kernel = np.random.rand(nbpola*(2*R+1)**2, N_clust)
+            self.kernel /= np.linalg.norm(self.kernel)
+        else:
+            self.kernel = np.random.rand(nbpola*camsize[0]*camsize[1], N_clust)
+            self.kernel /= np.linalg.norm(self.kernel)
         self.cumhisto = np.ones([N_clust])
         
     def homeorule(self):

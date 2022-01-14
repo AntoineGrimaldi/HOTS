@@ -26,24 +26,27 @@ def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, shuffle=Tr
 
 def get_isi(events, ordering = 'xytp', verbose = False):
     t_index, p_index = ordering.index('t'), ordering.index('p')
-    mean_isi = None
-    median_isi = None
-    isipol = np.zeros([2])
+    meanisipol = np.zeros([2])
+    medianisipol = np.zeros([2])
     for polarity in [0,1]:
         events_pol = events[(events[:, p_index]==polarity)]
         N_events = events_pol.shape[0]-1
-        for i in range(events_pol.shape[0]-1):
-            isi = events_pol[i+1,t_index]-events_pol[i,t_index]
-            if isi>0:
-                mean_isi = (N_events-1)/N_events*mean_isi+1/N_events*isi if mean_isi else isi
-        isipol[polarity]=mean_isi
+        isi = np.diff(events_pol[:, t_index])
+        mean_isi = np.mean(isi)
+        median_isi = np.median(isi)
+        meanisipol[polarity] = mean_isi
+        medianisipol[polarity] = median_isi
     if verbose:
-        print(f'Mean ISI for ON events: {np.round(isipol[1].mean()*1e-3,1)} in ms \n')
-        print(f'Mean ISI for OFF events: {np.round(isipol[0].mean()*1e-3,1)} in ms \n')
-    return isipol
+        print(f'Mean ISI for ON events: {np.round(meanisipol[1]*1e-3,1)} in ms \n')
+        print(f'Mean ISI for OFF events: {np.round(meanisipol[0]*1e-3,1)} in ms \n')
+        print(f'Median ISI for ON events: {np.round(medianisipol[1]*1e-3,1)} in ms \n')
+        print(f'Median ISI for OFF events: {np.round(medianisipol[0]*1e-3,1)} in ms \n')
 
-def get_dataset_info(trainset, testset):
+    return meanisipol, medianisipol
+
+def get_dataset_info(trainset, testset, test=False):
     t_index = trainset.ordering.index("t")
+    y_index = trainset.ordering.index("x"), trainset.ordering.index("y")
     
     print(f'number of samples in the trainset: {len(trainset)}')
     print(f'number of samples in the testset: {len(testset)}')
@@ -52,17 +55,30 @@ def get_dataset_info(trainset, testset):
     nbev = []
     recordingtime = []
     mean_isi = []
+    number_of_timestamp_error = 0
+    if test:
+        wrong_indexes = []
+        ind = 0
     
-    loader = get_loader(trainset)
+    loader = get_loader(trainset, shuffle=False)
     for events, target in loader:
         events = events.squeeze().numpy()
-        mean_isi.append(get_isi(events,trainset.ordering).mean())
+        mean_isi.append(get_isi(events,trainset.ordering)[0].mean())
         nbev.append(len(events))
         recordingtime.append(events[:,t_index][-1])
-    loader = get_loader(testset)
+        if test:
+            if np.sum(np.diff(events[:,t_index])<0)>0:
+                wrong_indexes.append([ind,0]) # 0 indicates the type of mistake (0 -> wrong timescale)
+            if np.max(events[:,x_index])>trainset.sensor_size[0] or np.max(events[:,x_index])<0:
+                wrong_indexes.append([ind,1])
+            if np.max(events[:,y_index])>trainset.sensor_size[1] or np.max(events[:,y_index])<0:
+                wrong_indexes.append([ind,1])
+            ind += 1
+                
+    loader = get_loader(testset, shuffle=False)
     for events, target in loader:
         events = events.squeeze().numpy()
-        mean_isi.append(get_isi(events,trainset.ordering).mean())
+        mean_isi.append(get_isi(events,trainset.ordering)[0].mean())
         nbev.append(len(events))
         recordingtime.append(events[:,t_index][-1])
         
@@ -76,7 +92,7 @@ def get_dataset_info(trainset, testset):
             ttl = 'number of events '
         else:
             x = mean_isi
-            ttl = 'mean ISI (in $\mu s$)'
+            ttl = 'median ISI (in $\mu s$)'
 
         n, bins, patches = axs[i].hist(x=x, bins='auto', color='#0504aa',
                                     alpha=0.7, rwidth=0.85)
@@ -90,7 +106,6 @@ def get_dataset_info(trainset, testset):
     print(f'mean value for the number of events: {int(np.round(np.mean(nbev),0))}')
     print(f'mean value for the interspike interval: {int(np.round(np.nanmean(mean_isi),0))} us')
     print(40*'-')
-    
 
 class HOTS_Dataset(tonic.dataset.Dataset):
     """Make a dataset from the output of the HOTS network

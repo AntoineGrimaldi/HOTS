@@ -40,7 +40,7 @@ class timesurface(object):
         self.t = 0
         self.p = 0
         self.iev = 0
-        self.spatpmat = np.zeros([nbpol,camsize[0]+1,camsize[1]+1])
+        self.spatpmat = np.zeros([nbpol,camsize[0],camsize[1]])
 
     def addevent(self, xev, yev, tev, pev): # get integers as input
         TS = []
@@ -66,8 +66,6 @@ class timesurface(object):
         card = np.nonzero(timesurf[self.p])
         if len(card[0])>self.filt*timesurf.shape[1]*timesurf.shape[2]/timesurf.shape[0]:
             TS = np.reshape(timesurf, [timesurf.shape[0]*timesurf.shape[1]*timesurf.shape[2]])
-        if np.isnan(TS):
-            self.plote()
         return TS
 
     def getts(self):
