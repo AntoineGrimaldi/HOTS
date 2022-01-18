@@ -76,13 +76,13 @@ class timesurface(object):
         if self.x-self.R<0:
             temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(self.R,0),(0,0)),'symmetric')
             xshift += self.R
-        if self.camsize[0]<self.x+self.R:
+        if self.camsize[0]<=self.x+self.R:
             temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(0,self.R),(0,0)),'symmetric')
         if self.y-self.R<0:
             temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(0,0),(self.R,0)),'symmetric')
             yshift += self.R
-        if self.camsize[1]<self.y+self.R:
-            temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(0,0),(0,self.R)),'symmetric')
+        if self.camsize[1]<=self.y+self.R:
+            temp_spatpmat = np.lib.pad(temp_spatpmat,((0,0),(0,0),(0,self.R+1)),'symmetric')
         timesurf = temp_spatpmat[:,int(xshift-self.R):int(xshift+self.R)+1,int(yshift-self.R):int(yshift+self.R)+1]
         return timesurf
     

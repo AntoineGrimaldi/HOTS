@@ -3,6 +3,7 @@ import numpy as np
 import os, torch, tonic, pickle
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsClassifier
 
 ## DATASET
 
@@ -24,88 +25,97 @@ def get_loader(dataset, kfold = None, kfold_ind = 0, num_workers = 0, shuffle=Tr
         loader = torch.utils.data.DataLoader(dataset, shuffle=shuffle, num_workers = num_workers)
     return loader
 
-def get_isi(events, ordering = 'xytp', verbose = False):
+def get_properties(events, target, ind_sample, values, ordering = 'xytp', distinguish_polarities = False):
     t_index, p_index = ordering.index('t'), ordering.index('p')
-    meanisipol = np.zeros([2])
-    medianisipol = np.zeros([2])
-    for polarity in [0,1]:
-        events_pol = events[(events[:, p_index]==polarity)]
-        N_events = events_pol.shape[0]-1
+    if distinguish_polarities: 
+        for polarity in [0,1]:
+            events_pol = events[(events[:, p_index]==polarity)]
+            isi = np.diff(events_pol[:, t_index])
+            if 'mean_isi' in values.keys():
+                values['mean_isi'][polarity, ind_sample, target] = (isi[isi>0]).mean()
+            if 'median_isi' in values.keys():
+                values['median_isi'][polarity, ind_sample, target] = np.median((isi[isi>0]))
+            if 'null_isi' in values.keys():
+                values['null_isi'][polarity, ind_sample, target] = (isi==0).mean()
+            if 'nb_events' in values.keys():
+                values['nb_events'][polarity, ind_sample, target] = events_pol.shape[0]
+    else:
+        events_pol = events
         isi = np.diff(events_pol[:, t_index])
-        mean_isi = np.mean(isi)
-        median_isi = np.median(isi)
-        meanisipol[polarity] = mean_isi
-        medianisipol[polarity] = median_isi
-    if verbose:
-        print(f'Mean ISI for ON events: {np.round(meanisipol[1]*1e-3,1)} in ms \n')
-        print(f'Mean ISI for OFF events: {np.round(meanisipol[0]*1e-3,1)} in ms \n')
-        print(f'Median ISI for ON events: {np.round(medianisipol[1]*1e-3,1)} in ms \n')
-        print(f'Median ISI for OFF events: {np.round(medianisipol[0]*1e-3,1)} in ms \n')
+        if 'mean_isi' in values.keys():
+            values['mean_isi'][0, ind_sample, target] = (isi[isi>0]).mean()
+        if 'median_isi' in values.keys():
+            values['median_isi'][0, ind_sample, target] = np.median((isi[isi>0]))
+        if 'null_isi' in values.keys():
+            values['null_isi'][0, ind_sample, target] = (isi==0).mean()
+        if 'nb_events' in values.keys():
+            values['nb_events'][0, ind_sample, target] = events_pol.shape[0]
+    if 'time' in values.keys():
+        values['time'][0, ind_sample, target] = events[-1,t_index]-events[0,t_index]
+        
+    return values
 
-    return meanisipol, medianisipol
-
-def get_dataset_info(trainset, testset, test=False):
-    t_index = trainset.ordering.index("t")
-    y_index = trainset.ordering.index("x"), trainset.ordering.index("y")
+def get_dataset_info(trainset, testset, properties = ['mean_isi', 'null_isi', 'nb_events'], distinguish_labels = False, distinguish_polarities = False):
     
     print(f'number of samples in the trainset: {len(trainset)}')
     print(f'number of samples in the testset: {len(testset)}')
     print(40*'-')
     
-    nbev = []
-    recordingtime = []
-    mean_isi = []
-    number_of_timestamp_error = 0
-    if test:
-        wrong_indexes = []
-        ind = 0
+    #x_index, y_index, t_index, p_index = trainset.ordering.index("x"), trainset.ordering.index("y"), trainset.ordering.index("t"), trainset.ordering.index("p")
+    nb_class = len(trainset.classes)
+    nb_sample = len(trainset)+len(testset)
+    nb_pola = 2
+    
+    values = {}
+    for name in properties:
+        values.update({name:np.zeros([nb_pola, nb_sample, nb_class])})
+
+    ind_sample = 0
     
     loader = get_loader(trainset, shuffle=False)
     for events, target in loader:
         events = events.squeeze().numpy()
-        mean_isi.append(get_isi(events,trainset.ordering)[0].mean())
-        nbev.append(len(events))
-        recordingtime.append(events[:,t_index][-1])
-        if test:
-            if np.sum(np.diff(events[:,t_index])<0)>0:
-                wrong_indexes.append([ind,0]) # 0 indicates the type of mistake (0 -> wrong timescale)
-            if np.max(events[:,x_index])>trainset.sensor_size[0] or np.max(events[:,x_index])<0:
-                wrong_indexes.append([ind,1])
-            if np.max(events[:,y_index])>trainset.sensor_size[1] or np.max(events[:,y_index])<0:
-                wrong_indexes.append([ind,1])
-            ind += 1
+        values = get_properties(events, target, ind_sample, values, ordering = trainset.ordering, distinguish_polarities = distinguish_polarities)
+        ind_sample += 1
                 
     loader = get_loader(testset, shuffle=False)
     for events, target in loader:
         events = events.squeeze().numpy()
-        mean_isi.append(get_isi(events,trainset.ordering)[0].mean())
-        nbev.append(len(events))
-        recordingtime.append(events[:,t_index][-1])
+        values = get_properties(events, target, ind_sample, values, ordering = trainset.ordering, distinguish_polarities = distinguish_polarities)
+        ind_sample += 1
         
-    fig, axs = plt.subplots(1,3, figsize=(15,5))
-    for i in range(3):
-        if i == 0:
-            x = recordingtime
-            ttl = 'recording time (in $\mu s$)'
-        elif i == 1:
-            x = nbev
-            ttl = 'number of events '
+    width_fig = 30
+    fig, axs = plt.subplots(1,len(values.keys()), figsize=(width_fig,width_fig//len(values.keys())))
+    for i, value in enumerate(values.keys()):
+        if distinguish_polarities:
+            x = []
+            for p in range(nb_pola):
+                x.append(values[value][p,:,:].sum(axis=1).ravel())
+            ttl = value
+        elif distinguish_labels:
+            x = []
+            for c in range(nb_class):
+                x.append(values[value][0,np.nonzero(values[value][0,:,c]),c].ravel())
+            ttl = value
         else:
-            x = mean_isi
-            ttl = 'median ISI (in $\mu s$)'
+            x = []
+            x.append(values[value][0,:,:].sum(axis=1).ravel())
+            ttl = value
 
-        n, bins, patches = axs[i].hist(x=x, bins='auto', color='#0504aa',
-                                    alpha=0.7, rwidth=0.85)
+        for k in range(len(x)):
+            n, bins, patches = axs[i].hist(x=x[k], bins='auto',
+                                    alpha=.5, rwidth=0.85)
+            
         axs[i].grid(axis='y', alpha=0.75)
         axs[i].set_xlabel('Value')
         axs[i].set_ylabel('Frequency')
         axs[i].set_title(f'Histogram for the {ttl}')
         maxfreq = n.max()
         axs[i].set_ylim(ymax=np.ceil(maxfreq / 10) * 10 if maxfreq % 10 else maxfreq + 10)
-    print(f'mean value for the recording time: {np.round(np.mean(recordingtime),0)/1e3} ms')
-    print(f'mean value for the number of events: {int(np.round(np.mean(nbev),0))}')
-    print(f'mean value for the interspike interval: {int(np.round(np.nanmean(mean_isi),0))} us')
-    print(40*'-')
+        #axs[i].set_xscale("log")
+        #axs[i].set_yscale("log")
+        
+    return values
 
 class HOTS_Dataset(tonic.dataset.Dataset):
     """Make a dataset from the output of the HOTS network
@@ -418,8 +428,8 @@ def fit_histo(network,
     dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))
     loader = get_loader(dataset, num_workers = num_workers)
     if verbose: print(f'Number of training samples: {len(loader)}')
-    model_name = f'../Records/models/{network.get_fname()}_{len(loader)}_histo.pkl'
-    
+    model_name = f'../Records/models/{network.get_fname()}_{len(loader)}_histo.pkl' 
+
     if os.path.isfile(model_name):
         print('load existing histograms')
         with open(model_name, 'rb') as file:
@@ -436,11 +446,59 @@ def fit_histo(network,
             events, label = events.squeeze(0), label.squeeze(0) # just one digit = one batch
             labelz.append(label)
             value, frequency = np.unique(events[:,p_index], return_counts=True)
-            histo[sample_number,[value]] = frequency
+            histo[sample_number,value] = frequency
             sample_number+=1
-        pbar.update(1)
+            pbar.update(1)
         pbar.close()
         with open(model_name, 'wb') as file:
             pickle.dump([histo, labelz], file, pickle.HIGHEST_PROTOCOL)
 
     return histo, labelz
+
+def predict_histo(network,
+                  histo_train,
+                  labelz_train,
+                  num_workers=0,
+                  measure='knn',
+                  k = 6,
+                  n_jobs = 16,
+                  verbose=True):
+    path_to_dataset = f'../Records/output/test/{network.get_fname()}_None/'
+    if not os.path.exists(path_to_dataset):
+        print('process samples with the HOTS network first')
+        return
+    timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
+    dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))
+    loader = get_loader(dataset, num_workers = num_workers)
+    if verbose: print(f'Number of testing samples: {len(loader)}')
+    
+    p_index = dataset.ordering.index('p')
+    n_polarity = timesurface_size[2]
+    histo_test = np.zeros([len(loader),n_polarity])
+    labelz_true = []
+    pbar = tqdm(total=len(loader))
+    sample_number = 0
+    for events, label in loader:
+        events, label = events.squeeze(0), label.squeeze(0) # just one digit = one batch
+        labelz_true.append(label)
+        value, frequency = np.unique(events[:,p_index], return_counts=True)
+        histo_test[sample_number,value] = frequency
+        sample_number += 1
+        pbar.update(1)
+    pbar.close()
+    
+    histo_train = (histo_train.T/np.sum(histo_train, axis=1)).T
+    histo_test = (histo_test.T/np.sum(histo_test, axis=1)).T
+    
+    if measure == 'knn':
+        knn = KNeighborsClassifier(n_neighbors=k, weights='uniform', metric = 'euclidean', n_jobs = n_jobs)
+    elif measure == 'euclidian':
+        knn = KNeighborsClassifier(n_neighbors=1, weights='uniform', metric = 'euclidean', n_jobs = n_jobs)
+    knn.fit(histo_train,labelz_train)
+    labelz_hat = knn.predict(histo_test)
+    accuracy = np.mean(labelz_hat==labelz_true)
+    #elif measure == 'KL':
+    #elif measure == 'EMD':
+    #https://mathoverflow.net/questions/103115/distance-metric-between-two-sample-distributions-histograms
+    
+    return accuracy
