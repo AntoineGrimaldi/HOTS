@@ -35,7 +35,7 @@ def get_properties(events, target, ind_sample, values, ordering = 'xytp', distin
                 values['mean_isi'][polarity, ind_sample, target] = (isi[isi>0]).mean()
             if 'median_isi' in values.keys():
                 values['median_isi'][polarity, ind_sample, target] = np.median((isi[isi>0]))
-            if 'null_isi' in values.keys():
+            if 'synchronous_events' in values.keys():
                 values['null_isi'][polarity, ind_sample, target] = (isi==0).mean()
             if 'nb_events' in values.keys():
                 values['nb_events'][polarity, ind_sample, target] = events_pol.shape[0]
@@ -46,8 +46,8 @@ def get_properties(events, target, ind_sample, values, ordering = 'xytp', distin
             values['mean_isi'][0, ind_sample, target] = (isi[isi>0]).mean()
         if 'median_isi' in values.keys():
             values['median_isi'][0, ind_sample, target] = np.median((isi[isi>0]))
-        if 'null_isi' in values.keys():
-            values['null_isi'][0, ind_sample, target] = (isi==0).mean()
+        if 'synchronous_events' in values.keys():
+            values['synchronous_events'][0, ind_sample, target] = (isi==0).mean()
         if 'nb_events' in values.keys():
             values['nb_events'][0, ind_sample, target] = events_pol.shape[0]
     if 'time' in values.keys():
@@ -55,7 +55,7 @@ def get_properties(events, target, ind_sample, values, ordering = 'xytp', distin
         
     return values
 
-def get_dataset_info(trainset, testset, properties = ['mean_isi', 'null_isi', 'nb_events'], distinguish_labels = False, distinguish_polarities = False):
+def get_dataset_info(trainset, testset, properties = ['mean_isi', 'synchronous_events', 'nb_events'], distinguish_labels = False, distinguish_polarities = False):
     
     print(f'number of samples in the trainset: {len(trainset)}')
     print(f'number of samples in the testset: {len(testset)}')
@@ -71,18 +71,26 @@ def get_dataset_info(trainset, testset, properties = ['mean_isi', 'null_isi', 'n
         values.update({name:np.zeros([nb_pola, nb_sample, nb_class])})
 
     ind_sample = 0
+    num_labels_trainset = np.zeros([nb_class])
+    num_labels_testset = np.zeros([nb_class])
     
     loader = get_loader(trainset, shuffle=False)
     for events, target in loader:
         events = events.squeeze().numpy()
         values = get_properties(events, target, ind_sample, values, ordering = trainset.ordering, distinguish_polarities = distinguish_polarities)
+        num_labels_trainset[target] += 1
         ind_sample += 1
                 
     loader = get_loader(testset, shuffle=False)
     for events, target in loader:
         events = events.squeeze().numpy()
         values = get_properties(events, target, ind_sample, values, ordering = trainset.ordering, distinguish_polarities = distinguish_polarities)
+        num_labels_testset[target] += 1
         ind_sample += 1
+        
+    print(f'number of samples in each class for the trainset: {num_labels_trainset}')
+    print(f'number of samples in each class for the testset: {num_labels_testset}')
+    print(40*'-')
         
     width_fig = 30
     fig, axs = plt.subplots(1,len(values.keys()), figsize=(width_fig,width_fig//len(values.keys())))
@@ -114,7 +122,6 @@ def get_dataset_info(trainset, testset, properties = ['mean_isi', 'null_isi', 'n
         axs[i].set_ylim(ymax=np.ceil(maxfreq / 10) * 10 if maxfreq % 10 else maxfreq + 10)
         #axs[i].set_xscale("log")
         #axs[i].set_yscale("log")
-        
     return values
 
 class HOTS_Dataset(tonic.dataset.Dataset):
@@ -170,8 +177,10 @@ class HOTS_Dataset(tonic.dataset.Dataset):
     
 ## MLR
     
-def fit_MLR(network, 
-            tau_cla, #enter tau_cla in ms
+def fit_MLR(tau_cla, #enter tau_cla in ms
+            network = None,
+            date = None,
+            dataset_as_input = None,
             kfold = None,
             kfold_ind = 0,
         #parameters of the model learning
@@ -182,24 +191,27 @@ def fit_MLR(network,
             seed = 42,
             verbose=True):
     
-    tau_cla*=1e3
-    path_to_dataset = f'../Records/output/train/{network.get_fname()}_None/'
-    if not os.path.exists(path_to_dataset):
-        print('process samples with the HOTS network first')
-        return
-    timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
-    
-    transform = tonic.transforms.Compose([tonic.transforms.ToTimesurface(sensor_size=timesurface_size, tau=tau_cla, decay="exp")])
-    dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
-    loader = get_loader(dataset, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, seed=seed)
-    if verbose: print(f'Number of training samples: {len(loader)}')
-    model_name = f'../Records/models/{network.get_fname()}_{int(tau_cla*1e-3)}_{len(loader)}_LR.pkl'
-    
+    if network:
+        model_name = f'../Records/models/{network.get_fname()}_{int(tau_cla)}_{kfold}_LR.pkl'
+    else:
+        model_name = f'../Records/models/{date}_raw_{int(tau_cla)}_{kfold}_LR.pkl'
+    print(f'Name of the model: \n {model_name}')
+        
     if os.path.isfile(model_name):
-        print('load existing model')
         with open(model_name, 'rb') as file:
             logistic_model, losses = pickle.load(file)
     else:
+        tau_cla*=1e3
+        if network:
+            path_to_dataset = f'../Records/output/train/{network.get_fname()}_None/'
+            timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
+            transform = tonic.transforms.Compose([tonic.transforms.ToTimesurface(sensor_size=timesurface_size, tau=tau_cla, decay="exp")])
+            dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
+        else:
+            dataset = dataset_as_input 
+            timesurface_size = dataset.sensor_size
+        loader = get_loader(dataset, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, seed=seed)
+
         torch.set_default_tensor_type("torch.DoubleTensor")
         criterion = torch.nn.BCELoss(reduction="mean")
         amsgrad = True #or False gives similar results
@@ -245,11 +257,13 @@ def fit_MLR(network,
 
     return logistic_model, losses
 
-def predict_MLR(network, 
-                model,
+def predict_MLR(model,
                 tau_cla, #enter tau_cla in ms
+                network = None,
+                date = None,
+                dataset_as_input = None,
+                dataset_for_timestamps_as_input = None,
                 jitter = None,
-                patch_size = None,
                 kfold = None,
                 kfold_ind = 0,
                 num_workers = 0,
@@ -257,49 +271,63 @@ def predict_MLR(network,
                 verbose=True,
         ):
     
-    tau_cla*=1e3
-    path_to_dataset = f'../Records/output/test/{network.get_fname()}_{jitter}/'
-    if not os.path.exists(path_to_dataset):
-        print('process samples with the HOTS network first')
-        return
-    timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
-    N = timesurface_size[0]*timesurface_size[1]*timesurface_size[2]
+    if network:
+        results_name = f'../Records/output/classif/{network.get_fname()}_{int(tau_cla)}_{kfold}_{jitter}_LR.pkl'
+    else:
+        results_name = f'../Records/output/classif/{date}_raw_{int(tau_cla)}_{kfold}_{jitter}_LR.pkl'
+    print(results_name)    
     
-    shuffle=False
-    transform = tonic.transforms.Compose([tonic.transforms.ToTimesurface(sensor_size=timesurface_size, tau=tau_cla, decay="exp")])
-    dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
-    loader = get_loader(dataset, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, shuffle=shuffle, seed=seed)
-    
-    dataset_for_timestamps = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))
-    loader_for_timestamps = get_loader(dataset_for_timestamps, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, shuffle=shuffle, seed=seed)
-    if verbose: print(f'Number of testing samples: {len(loader)}')
-    
-    with torch.no_grad():
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        if verbose:
-            print(f'device -> {device} - num workers -> {num_workers}')
+    if os.path.isfile(results_name):
+        with open(results_name, 'rb') as file:
+            likelihood, true_target, timestamps = pickle.load(file) 
+    else:    
+        tau_cla*=1e3
+        if network:
+            path_to_dataset = f'../Records/output/test/{network.get_fname()}_{jitter}/'
+            timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
+            transform = tonic.transforms.Compose([tonic.transforms.ToTimesurface(sensor_size=timesurface_size, tau=tau_cla, decay="exp")])
+            dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
+            dataset_for_timestamps = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))
+        else:
+            dataset = dataset_as_input 
+            dataset_for_timestamps = dataset_for_timestamps_as_input
+            timesurface_size = dataset.sensor_size
+        shuffle=False
+        loader = get_loader(dataset, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, shuffle=shuffle, seed=seed)
+        loader_for_timestamps = get_loader(dataset_for_timestamps, kfold = kfold, kfold_ind = kfold_ind, num_workers = num_workers, shuffle=shuffle, seed=seed)
+        if verbose: print(f'Number of testing samples: {len(loader)}')
 
-        logistic_model = model.to(device)
+        N = timesurface_size[0]*timesurface_size[1]*timesurface_size[2]
 
-        if verbose:
-            pbar = tqdm(total=len(loader))
-        likelihood, true_target, timestamps = [], [], []
-
-        for X, label in loader:
-            X, label = X[0].to(device) ,label[0].to(device)
-            X = X.reshape(X.shape[0], N)
-            n_events = X.shape[0]
-            outputs = logistic_model(X)
-            likelihood.append(outputs.cpu().numpy())
-            true_target.append(label.cpu().numpy())
+        with torch.no_grad():
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if verbose:
-                pbar.update(1)
-        if verbose:
-            pbar.close()
-            
-        t_index = dataset_for_timestamps.ordering.index('t')
-        for events, target in loader_for_timestamps:
-            timestamps.append(events[0,:,t_index])
+                print(f'device -> {device} - num workers -> {num_workers}')
+
+            logistic_model = model.to(device)
+
+            if verbose:
+                pbar = tqdm(total=len(loader))
+            likelihood, true_target, timestamps = [], [], []
+
+            for X, label in loader:
+                X, label = X[0].to(device) ,label[0].to(device)
+                X = X.reshape(X.shape[0], N)
+                n_events = X.shape[0]
+                outputs = logistic_model(X)
+                likelihood.append(outputs.cpu().numpy())
+                true_target.append(label.cpu().numpy())
+                if verbose:
+                    pbar.update(1)
+            if verbose:
+                pbar.close()
+
+            t_index = dataset_for_timestamps.ordering.index('t')
+            for events, target in loader_for_timestamps:
+                timestamps.append(events[0,:,t_index])
+
+            with open(results_name, 'wb') as file:
+                pickle.dump([likelihood, true_target, timestamps], file, pickle.HIGHEST_PROTOCOL)
 
     return likelihood, true_target, timestamps
 
@@ -350,7 +378,7 @@ def score_classif_events(likelihood, true_target, thres=None, verbose=True):
 
     if verbose:
         print(f'Mean accuracy: {np.round(meanac,3)*100}%')
-        plt.plot(onlinac);
+        plt.semilogx(onlinac, '.');
         plt.xlabel('number of events');
         plt.ylabel('online accuracy');
         plt.title('LR classification results evolution as a function of the number of events');
@@ -372,30 +400,41 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
     lastac = 0
     nb_test = len(true_target)
     
+    pbar = tqdm(total=len(likelihood))
+    
     for likelihood_, true_target_, timestamps_ in zip(likelihood, true_target, timestamps):
         pred_timestep = np.zeros(len(time_axis))
         pred_timestep[:] = np.nan
         for step in range(1,len(pred_timestep)):
             indices = np.where((timestamps_.numpy()<=time_axis[step])&(timestamps_.numpy()>time_axis[step-1]))[0]
             mean_likelihood = np.mean(likelihood_[indices,:],axis=0)
+            
             if np.isnan(mean_likelihood).sum()>0:
-                if not np.isnan(np.array(pred_timestep[step-1])):
-                    pred_timestep[step] = pred_timestep[step-1]
-                    #pred_timestep[step] = np.nan
+                #if not np.isnan(np.array(pred_timestep[step-1])):
+                #    pred_timestep[step] = pred_timestep[step-1]
+                pred_timestep[step] = np.nan
             else:
                 if not thres:
                     pred_timestep[step] = np.nanargmax(mean_likelihood)
                 elif np.max(likelihood_[indices,np.nanargmax(mean_likelihood)])>thres:
                     pred_timestep[step] = np.nanargmax(mean_likelihood)
-                elif not np.isnan(np.array(pred_timestep[step-1])):
-                    pred_timestep[step] = pred_timestep[step-1]
-                    #pred_timestep[step] = np.nan
+                #elif not np.isnan(np.array(pred_timestep[step-1])):
+                #    pred_timestep[step] = pred_timestep[step-1]
+                else:
+                    pred_timestep[step] = np.nan
             if not np.isnan(pred_timestep[step]):
                 matscor[sample,step] = pred_timestep[step]==true_target_
-        if pred_timestep[-1]==true_target_:
-            lastac+=1
-        sample+=1
         
+        lastev = -1
+        while np.isnan(pred_timestep[lastev]):
+            lastev -= 1
+        if pred_timestep[lastev]==true_target_:
+            lastac+=1
+        pbar.update(1)
+        sample+=1
+       
+    pbar.close()
+    
     meanac = np.nanmean(matscor)
     onlinac = np.nanmean(matscor, axis=0)
     lastac/=nb_test
@@ -404,7 +443,7 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
         
     if verbose:
         print(f'Mean accuracy: {np.round(meanac,3)*100}%')
-        plt.plot(time_axis*1e-3,onlinac);
+        plt.semilogx(time_axis*1e-3,onlinac, '.');
         plt.xlabel('time (in ms)');
         plt.ylabel('online accuracy');
         plt.title('LR classification results evolution as a function of time');
