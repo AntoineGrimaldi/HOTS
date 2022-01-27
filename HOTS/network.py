@@ -71,7 +71,7 @@ class network(object):
         p_index = ordering.index('p')
         
         if learn:
-            model, loaded = self.load_model()
+            model, loaded = self.load_model(verbose)
             if loaded:
                 self.L = model.L
                 self.TS = model.TS
@@ -84,7 +84,7 @@ class network(object):
             else: output_path = f'../Records/output/test/{self.get_fname()}_{jitter}/'
 
             if os.path.exists(output_path):
-                print(f'this dataset have already been processed, check at: \n {output_path}')
+                if verbose: print(f'this dataset have already been processed, check at: \n {output_path}')
                 return
             else:
                 for classe in classes:
@@ -144,13 +144,13 @@ class network(object):
         with open(f_name, 'wb') as file:
             pickle.dump(self, file, pickle.HIGHEST_PROTOCOL)
 
-    def load_model(self):
+    def load_model(self, verbose):
         loaded = False
         model = []
         path = '../Records/models/'
         f_name = path+self.get_fname()+'.pkl'
         if os.path.isfile(f_name):
-            print(f'loading a network with name:\n {f_name}')
+            if verbose: print(f'loading a network with name:\n {f_name}')
             with open(f_name, 'rb') as file:
                 model = pickle.load(file)
             loaded = True

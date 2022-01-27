@@ -195,7 +195,7 @@ def fit_MLR(tau_cla, #enter tau_cla in ms
         model_name = f'../Records/models/{network.get_fname()}_{int(tau_cla)}_{kfold}_LR.pkl'
     else:
         model_name = f'../Records/models/{date}_raw_{int(tau_cla)}_{kfold}_LR.pkl'
-    print(f'Name of the model: \n {model_name}')
+    if verbose: print(f'Name of the model: \n {model_name}')
         
     if os.path.isfile(model_name):
         with open(model_name, 'rb') as file:
@@ -275,7 +275,7 @@ def predict_MLR(model,
         results_name = f'../Records/output/classif/{network.get_fname()}_{int(tau_cla)}_{kfold}_{jitter}_LR.pkl'
     else:
         results_name = f'../Records/output/classif/{date}_raw_{int(tau_cla)}_{kfold}_{jitter}_LR.pkl'
-    print(results_name)    
+    if verbose: print(results_name)    
     
     if os.path.isfile(results_name):
         with open(results_name, 'rb') as file:
@@ -287,7 +287,7 @@ def predict_MLR(model,
             timesurface_size = (network.TS[0].camsize[0], network.TS[0].camsize[1], network.L[-1].kernel.shape[1])
             transform = tonic.transforms.Compose([tonic.transforms.ToTimesurface(sensor_size=timesurface_size, tau=tau_cla, decay="exp")])
             dataset = HOTS_Dataset(path_to_dataset, timesurface_size, transform=transform)
-            dataset_for_timestamps = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))
+            dataset_for_timestamps = HOTS_Dataset(path_to_dataset, timesurface_size, transform=tonic.transforms.NumpyAsType(int))#tonic.transforms.Compose([tonic.transforms.TimeAlignment()]))
         else:
             dataset = dataset_as_input 
             dataset_for_timestamps = dataset_for_timestamps_as_input
@@ -400,7 +400,7 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
     lastac = 0
     nb_test = len(true_target)
     
-    pbar = tqdm(total=len(likelihood))
+    if verbose: pbar = tqdm(total=len(likelihood))
     
     for likelihood_, true_target_, timestamps_ in zip(likelihood, true_target, timestamps):
         pred_timestep = np.zeros(len(time_axis))
@@ -408,18 +408,13 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
         for step in range(1,len(pred_timestep)):
             indices = np.where((timestamps_.numpy()<=time_axis[step])&(timestamps_.numpy()>time_axis[step-1]))[0]
             mean_likelihood = np.mean(likelihood_[indices,:],axis=0)
-            
             if np.isnan(mean_likelihood).sum()>0:
-                #if not np.isnan(np.array(pred_timestep[step-1])):
-                #    pred_timestep[step] = pred_timestep[step-1]
                 pred_timestep[step] = np.nan
             else:
                 if not thres:
                     pred_timestep[step] = np.nanargmax(mean_likelihood)
                 elif np.max(likelihood_[indices,np.nanargmax(mean_likelihood)])>thres:
                     pred_timestep[step] = np.nanargmax(mean_likelihood)
-                #elif not np.isnan(np.array(pred_timestep[step-1])):
-                #    pred_timestep[step] = pred_timestep[step-1]
                 else:
                     pred_timestep[step] = np.nan
             if not np.isnan(pred_timestep[step]):
@@ -430,10 +425,10 @@ def score_classif_time(likelihood, true_target, timestamps, timestep, thres=None
             lastev -= 1
         if pred_timestep[lastev]==true_target_:
             lastac+=1
-        pbar.update(1)
+        if verbose: pbar.update(1)
         sample+=1
        
-    pbar.close()
+    if verbose: pbar.close()
     
     meanac = np.nanmean(matscor)
     onlinac = np.nanmean(matscor, axis=0)
@@ -470,7 +465,7 @@ def fit_histo(network,
     model_name = f'../Records/models/{network.get_fname()}_{len(loader)}_histo.pkl' 
 
     if os.path.isfile(model_name):
-        print('load existing histograms')
+        if verbose: print('load existing histograms')
         with open(model_name, 'rb') as file:
             histo, labelz = pickle.load(file)
     else:
@@ -515,7 +510,7 @@ def predict_histo(network,
     n_polarity = timesurface_size[2]
     histo_test = np.zeros([len(loader),n_polarity])
     labelz_true = []
-    pbar = tqdm(total=len(loader))
+    if verbose: pbar = tqdm(total=len(loader))
     sample_number = 0
     for events, label in loader:
         events, label = events.squeeze(0), label.squeeze(0) # just one digit = one batch
@@ -523,8 +518,8 @@ def predict_histo(network,
         value, frequency = np.unique(events[:,p_index], return_counts=True)
         histo_test[sample_number,value] = frequency
         sample_number += 1
-        pbar.update(1)
-    pbar.close()
+        if verbose: pbar.update(1)
+    if verbose: pbar.close()
     
     histo_train = (histo_train.T/np.sum(histo_train, axis=1)).T
     histo_test = (histo_test.T/np.sum(histo_test, axis=1)).T
@@ -535,7 +530,7 @@ def predict_histo(network,
         knn = KNeighborsClassifier(n_neighbors=1, weights='uniform', metric = 'euclidean', n_jobs = n_jobs)
     knn.fit(histo_train,labelz_train)
     labelz_hat = knn.predict(histo_test)
-    accuracy = np.mean(labelz_hat==labelz_true)
+    accuracy = np.mean(labelz_hat==labelz_true)*100
     #elif measure == 'KL':
     #elif measure == 'EMD':
     #https://mathoverflow.net/questions/103115/distance-metric-between-two-sample-distributions-histograms
