@@ -52,7 +52,6 @@ def get_properties(events, target, ind_sample, values, ordering = 'xytp', distin
             values['nb_events'][0, ind_sample, target] = events_pol.shape[0]
     if 'time' in values.keys():
         values['time'][0, ind_sample, target] = events[-1,t_index]-events[0,t_index]
-        
     return values
 
 def get_dataset_info(trainset, testset, properties = ['mean_isi', 'synchronous_events', 'nb_events'], distinguish_labels = False, distinguish_polarities = False):
