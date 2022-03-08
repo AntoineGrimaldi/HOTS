@@ -2,6 +2,9 @@
 
 A bio-plausible version of [HOTS: A Hierarchy of Event-Based Time-Surfaces for Pattern Recognition](https://ieeexplore.ieee.org/abstract/document/7508476)
 
+
+
+
 ## Requirements :
 Running the HOTS library requires the following packages :
 
